@@ -113,12 +113,12 @@ function parseChequing(text: string, accountName: string): Transaction[] {
       let amount = 0;
       if (amounts.length >= 2) {
         // Has withdrawn and balance, or deposited and balance
-        const firstAmt = cleanAmount(amounts[0]);
-        const secondAmt = amounts.length >= 2 ? cleanAmount(amounts[1]) : 0;
+        const firstAmt = cleanAmount(amounts[0] ?? '');
+        const secondAmt = amounts.length >= 2 ? cleanAmount(amounts[1] ?? '') : 0;
 
         // Determine if the first amount is in withdrawn or deposited column
         // by checking position in the original line
-        const firstAmtStr = amounts[0];
+        const firstAmtStr = amounts[0] ?? '';
         const firstAmtIdx = rest.indexOf(firstAmtStr);
         const restLen = rest.length;
 
@@ -127,7 +127,7 @@ function parseChequing(text: string, accountName: string): Transaction[] {
         // If there are 2 amounts: one of (withdrawn|deposited) + balance
         if (amounts.length >= 3) {
           // withdrawn, deposited, balance
-          amount = cleanAmount(amounts[1]) - cleanAmount(amounts[0]);
+          amount = cleanAmount(amounts[1] ?? '') - cleanAmount(amounts[0] ?? '');
         } else {
           // 2 amounts: determine which column the first one is in
           // Check the text layout — if description is followed by gap then amount, it's usually withdrawn
