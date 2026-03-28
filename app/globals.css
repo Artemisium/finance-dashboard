@@ -1,0 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --scrollbar-width: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #0a0a12;
+  color: #e8e8f5;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
+}
+::-webkit-scrollbar-track {
+  background: #10101c;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a45;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a5c;
+}
+
+/* Recharts overrides */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #16162a !important;
+  border: 1px solid #2a2a45 !important;
+  border-radius: 8px !important;
+}
+
+.recharts-cartesian-axis-tick-value {
+  fill: #8888aa !important;
+  font-size: 11px !important;
+}
+
+.recharts-legend-item-text {
+  color: #8888aa !important;
+  font-size: 12px !important;
+}
+
+/* Utility classes */
+@layer utilities {
+  .text-money-positive {
+    color: #4ecca3;
+  }
+  .text-money-negative {
+    color: #ef4444;
+  }
+  .card {
+    background: #16162a;
+    border: 1px solid #2a2a45;
+    border-radius: 12px;
+  }
+}
