@@ -10,7 +10,7 @@ import {
   BarChart3,
   Briefcase,
   Upload,
-  Settings,
+  Database,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { href: '/budget', label: 'Budget', icon: Target },
   { href: '/assets', label: 'Assets', icon: BarChart3 },
   { href: '/income', label: 'Income & Tax', icon: Briefcase },
+  { href: '/data', label: 'Data Management', icon: Database },
 ];
 
 export default function Sidebar() {

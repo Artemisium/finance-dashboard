@@ -66,6 +66,14 @@ export interface TaxSettings {
   ytdTfsaContributions: number;
 }
 
+export interface SalarySettings {
+  annualSalary: number;
+  annualBonus: number;
+  bonusMonth: number; // 0-11 (January = 0)
+  payFrequency: 'biweekly' | 'semimonthly' | 'monthly';
+  employer: string;
+}
+
 export interface AppData {
   transactions: Transaction[];
   accounts: Account[];
@@ -73,5 +81,6 @@ export interface AppData {
   budgetCategories: BudgetCategory[];
   incomeEntries: IncomeEntry[];
   taxSettings: TaxSettings;
+  salarySettings: SalarySettings;
   lastUpdated: string;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { AppData, Transaction, Account, RecurringExpense, BudgetCategory, IncomeEntry, TaxSettings } from './types';
+import { AppData, Transaction, Account, RecurringExpense, BudgetCategory, IncomeEntry, TaxSettings, SalarySettings } from './types';
 
 const STORAGE_KEY = 'finance_dashboard_v1';
 
@@ -11,6 +11,14 @@ const DEFAULT_TAX_SETTINGS: TaxSettings = {
   tfsaContributionRoom: 7000,
   ytdRrspContributions: 0,
   ytdTfsaContributions: 0,
+};
+
+const DEFAULT_SALARY_SETTINGS: SalarySettings = {
+  annualSalary: 0,
+  annualBonus: 0,
+  bonusMonth: 2, // March default
+  payFrequency: 'biweekly',
+  employer: '',
 };
 
 const DEFAULT_DATA: AppData = {
@@ -27,6 +35,7 @@ const DEFAULT_DATA: AppData = {
   ],
   incomeEntries: [],
   taxSettings: DEFAULT_TAX_SETTINGS,
+  salarySettings: DEFAULT_SALARY_SETTINGS,
   lastUpdated: new Date().toISOString(),
 };
 
@@ -111,6 +120,92 @@ export function getMonthlyTotals(transactions: Transaction[]): { month: string; 
       expenses: Math.round(expenses * 100) / 100,
       net: Math.round((income - expenses) * 100) / 100,
     }));
+}
+
+// ─── Data Management helpers ─────────────────────────────────────────────────
+
+export function wipeTransactionsByAccount(data: AppData, accountName: string): AppData {
+  return {
+    ...data,
+    transactions: data.transactions.filter((t) => t.account !== accountName),
+  };
+}
+
+export function wipeTransactionsBySource(data: AppData, source: string): AppData {
+  return {
+    ...data,
+    transactions: data.transactions.filter((t) => t.source !== source),
+  };
+}
+
+export function deleteTransaction(data: AppData, id: string): AppData {
+  return {
+    ...data,
+    transactions: data.transactions.filter((t) => t.id !== id),
+  };
+}
+
+export function getUniqueAccounts(transactions: Transaction[]): string[] {
+  return [...new Set(transactions.map((t) => t.account))].sort();
+}
+
+export function getUniqueSources(transactions: Transaction[]): string[] {
+  return [...new Set(transactions.map((t) => t.source))].sort();
+}
+
+// ─── Salary / Income helpers ─────────────────────────────────────────────────
+
+export function getMonthlyGrossSalary(settings: SalarySettings): number {
+  if (!settings.annualSalary) return 0;
+  switch (settings.payFrequency) {
+    case 'monthly': return settings.annualSalary / 12;
+    case 'semimonthly': return settings.annualSalary / 24;
+    case 'biweekly': return settings.annualSalary / 26;
+    default: return settings.annualSalary / 12;
+  }
+}
+
+export function getPayPerPeriod(settings: SalarySettings): number {
+  if (!settings.annualSalary) return 0;
+  switch (settings.payFrequency) {
+    case 'monthly': return settings.annualSalary / 12;
+    case 'semimonthly': return settings.annualSalary / 24;
+    case 'biweekly': return settings.annualSalary / 26;
+    default: return settings.annualSalary / 12;
+  }
+}
+
+export function getExpectedMonthlyGross(settings: SalarySettings, month: number): number {
+  // month is 0-11
+  let gross = settings.annualSalary / 12;
+  if (settings.annualBonus > 0 && settings.bonusMonth === month) {
+    gross += settings.annualBonus;
+  }
+  return gross;
+}
+
+export function detectSalaryDeposits(transactions: Transaction[]): Transaction[] {
+  // Find deposits on chequing/debit accounts that look like salary or payroll
+  // Salary deposits are typically: positive amounts, from chequing accounts,
+  // with patterns like "PAYROLL", "SALARY", "DIRECT DEPOSIT", "PAY", employer names, etc.
+  const salaryKeywords = [
+    'payroll', 'salary', 'direct deposit', 'paycheque', 'paycheck',
+    'pay', 'employment', 'bi-weekly pay', 'semi-monthly', 'compensation',
+    'deposit from', 'electronic deposit',
+  ];
+
+  return transactions
+    .filter((t) => {
+      if (t.amount <= 0) return false; // must be a deposit
+      if (t.category === 'Transfers' || t.category === 'Investments') return false;
+      const lower = t.description.toLowerCase();
+      // Match salary keywords
+      if (salaryKeywords.some((kw) => lower.includes(kw))) return true;
+      // Also detect large recurring deposits (> $1000) that aren't transfers
+      if (t.amount >= 1000 && t.source === 'scotiabank') return true;
+      return false;
+    })
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
 // ─── Canadian Tax Estimate (simplified) ───────────────────────────────────────
