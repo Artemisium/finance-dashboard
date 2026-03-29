@@ -43,9 +43,10 @@ export default function IncomePage() {
     setData(loadData());
   }, []);
 
-  if (!data) return null;
-
-  const { incomeEntries, taxSettings, salarySettings, transactions } = data;
+  const incomeEntries = data?.incomeEntries || [];
+  const taxSettings = data?.taxSettings || { province: 'ON', filingStatus: 'single' as const, rrspContributionRoom: 31560, tfsaContributionRoom: 7000, ytdRrspContributions: 0, ytdTfsaContributions: 0 };
+  const salarySettings = data?.salarySettings || { annualSalary: 0, annualBonus: 0, bonusMonth: 2, payFrequency: 'biweekly' as const, employer: '' };
+  const transactions = data?.transactions || [];
   const currentYear = new Date().getFullYear();
 
   // ─── Salary-derived calculations ────────────────────────────────────────────
@@ -92,6 +93,8 @@ export default function IncomePage() {
       };
     });
   }, [salarySettings, taxSettings, detectedDeposits, incomeEntries, currentYear]);
+
+  if (!data) return null;
 
   // YTD totals
   const currentMonth = new Date().getMonth();
