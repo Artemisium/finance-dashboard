@@ -146,11 +146,11 @@ export function deleteTransaction(data: AppData, id: string): AppData {
 }
 
 export function getUniqueAccounts(transactions: Transaction[]): string[] {
-  return [...new Set(transactions.map((t) => t.account))].sort();
+  return Array.from(new Set(transactions.map((t) => t.account))).sort();
 }
 
 export function getUniqueSources(transactions: Transaction[]): string[] {
-  return [...new Set(transactions.map((t) => t.source))].sort();
+  return Array.from(new Set(transactions.map((t) => t.source))).sort();
 }
 
 // ─── Salary / Income helpers ─────────────────────────────────────────────────

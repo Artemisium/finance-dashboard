@@ -27,7 +27,7 @@ export default function DataManagementPage() {
   if (!data) return null;
 
   const accounts = getUniqueAccounts(data.transactions);
-  const sources = [...new Set(data.transactions.map((t) => t.source))].sort();
+  const sources = Array.from(new Set(data.transactions.map((t) => t.source))).sort();
 
   // Filtered transactions
   const filtered = useMemo(() => {
