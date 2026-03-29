@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { Plus, Trash2, Edit2, Check, X, Info, DollarSign, TrendingUp, Search, ArrowUpDown } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
-  LineChart, Line, Legend, ReferenceLine,
+  Legend,
 } from 'recharts';
 import {
   loadData, saveData, estimateTax,
@@ -53,8 +53,6 @@ export default function IncomePage() {
   const taxEst = estimateTax(annualTotal, taxSettings.ytdRrspContributions);
   const monthlyGross = salarySettings.annualSalary / 12;
   const monthlyNetEst = taxEst.netIncome / 12;
-  const monthlyTaxEst = (taxEst.total) / 12;
-
   // Monthly expected vs actual from deposits
   const detectedDeposits = useMemo(() => detectSalaryDeposits(transactions), [transactions]);
 
@@ -62,7 +60,6 @@ export default function IncomePage() {
     return Array.from({ length: 12 }, (_, i) => {
       const expectedGross = getExpectedMonthlyGross(salarySettings, i);
       // Calculate expected net for this month
-      const annualForMonth = salarySettings.annualSalary + (salarySettings.bonusMonth === i ? salarySettings.annualBonus : 0);
       const monthTax = estimateTax(salarySettings.annualSalary + salarySettings.annualBonus, taxSettings.ytdRrspContributions);
       const expectedNet = expectedGross - (monthTax.total / 12) - (salarySettings.bonusMonth === i && salarySettings.annualBonus > 0
         ? (salarySettings.annualBonus * monthTax.effectiveRate / 100) : 0);
