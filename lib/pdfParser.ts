@@ -182,13 +182,12 @@ function parseLOCVisa(text: string, accountName: string, type: ScotiaType): Tran
   const transactions: Transaction[] = [];
 
   // Regex to match a transaction start line:
-  // 3-digit ref# + space + transDate(Mon DD) + postDate(Mon DD, no space before it) + rest
+  // 3-digit ref# + transDate(MonDD or Mon DD) + postDate(MonDD or Mon DD) + rest
+  // Space between month and day is optional (some PDFs have "Jul28", others "Jul 28")
   const MON = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)';
   const txStartRegex = new RegExp(
-    `^(\\d{3})\\s+(${MON})\\s+(\\d{1,2})(${MON})\\s+(\\d{1,2})(.+)$`, 'i'
+    `^(\\d{3})\\s+(${MON})\\s*(\\d{1,2})\\s*(${MON})\\s*(\\d{1,2})(.+)$`, 'i'
   );
-  // Match the last decimal amount on the line, possibly followed by trailing junk digits (page codes)
-  const amountOnLineRegex = /([\d,]+\.\d{2}-?)\s*(?:\d{5,}.*)?$/;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -205,15 +204,41 @@ function parseLOCVisa(text: string, accountName: string, type: ScotiaType): Tran
     if (!date) continue;
 
     // Extract the CAD amount from the FIRST line only (before joining continuations)
-    // The CAD amount is always the last decimal number on the transaction start line
-    const amountMatch = rest.match(amountOnLineRegex);
-    if (!amountMatch) continue;
+    // Strategy: find the first amount preceded by 2+ spaces (column gap),
+    // or fall back to the last amount at end of line
+    let amountStr = '';
+    let amountPos = -1;
 
-    const amountStr = amountMatch[1];
+    // Try 1: amount after a column gap (2+ spaces)
+    const gapMatch = rest.match(/\s{2,}([\d,]+\.\d{2}-?)/);
+    if (gapMatch) {
+      amountStr = gapMatch[1];
+      amountPos = rest.indexOf(gapMatch[0]) + gapMatch[0].indexOf(gapMatch[1]);
+    }
+
+    // Try 2: amount at end of line (for lines with no column gap)
+    if (!amountStr) {
+      const endMatch = rest.match(/([\d,]+\.\d{2}-?)\s*$/);
+      if (endMatch) {
+        amountStr = endMatch[1];
+        amountPos = rest.lastIndexOf(amountStr);
+      }
+    }
+
+    // Try 3: first decimal amount on the line (last resort for merged sidebar text)
+    if (!amountStr) {
+      const anyMatch = rest.match(/([\d,]+\.\d{2}-?)/);
+      if (anyMatch && anyMatch.index !== undefined) {
+        amountStr = anyMatch[1];
+        amountPos = anyMatch.index;
+      }
+    }
+
+    if (!amountStr) continue;
+
     const rawAmount = cleanAmount(amountStr);
 
     // Description is everything before the amount on the first line
-    const amountPos = rest.lastIndexOf(amountStr);
     let description = rest.substring(0, amountPos).trim();
 
     // Skip to next transaction line (consume continuations but don't need them for description)

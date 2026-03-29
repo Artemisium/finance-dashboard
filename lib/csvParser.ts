@@ -208,12 +208,80 @@ function preprocessAmexCSV(content: string): string {
   return content;
 }
 
+// ─── Headerless Scotiabank CSV ──────────────────────────────────────────────
+// Format: M/D/YYYY,"description",amount (no header row)
+// Used by LOC, Visa, and Chequing CSV exports
+function isHeaderlessScotiabank(content: string): boolean {
+  const firstLine = content.split(/\r?\n/)[0]?.trim() || '';
+  // Check if first line starts with a date like "4/1/2024" or "11/9/2024"
+  return /^\d{1,2}\/\d{1,2}\/\d{4},/.test(firstLine);
+}
+
+function parseHeaderlessScotiabank(content: string, accountName: string): Transaction[] {
+  const result = Papa.parse<string[]>(content, {
+    header: false,
+    skipEmptyLines: true,
+  });
+
+  return result.data
+    .filter((row) => row.length >= 3)
+    .map((row): Transaction | null => {
+      const dateRaw = row[0]?.trim() || '';
+      const date = parseDate(dateRaw);
+      if (!date) return null;
+
+      let description = (row[1] || '').trim();
+      // Clean up extra whitespace from Scotiabank formatting
+      description = description.replace(/\s+/g, ' ').trim();
+      // Remove Samsung Pay tag
+      description = description.replace(/\(Samsung Pay\)/gi, '').trim();
+
+      const amount = parseFloat(row[2]?.trim() || '0') || 0;
+
+      return {
+        id: generateId(),
+        date,
+        description,
+        rawDescription: description,
+        amount,
+        category: categorizeTransaction(description),
+        source: 'scotiabank' as DataSource,
+        account: accountName,
+      };
+    })
+    .filter((t): t is Transaction => t !== null && t.amount !== 0);
+}
+
 export function parseCSVFile(
   content: string,
   source: DataSource,
   accountName: string
 ): ParsedCSVResult {
   const errors: string[] = [];
+
+  // Check for headerless Scotiabank CSV first (LOC, Visa, Chequing exports)
+  if (source === 'scotiabank' && isHeaderlessScotiabank(content)) {
+    const transactions = parseHeaderlessScotiabank(content, accountName);
+    return {
+      transactions,
+      accountName,
+      source: 'scotiabank',
+      count: transactions.length,
+      errors,
+    };
+  }
+
+  // Also auto-detect headerless Scotiabank even if source wasn't set
+  if (isHeaderlessScotiabank(content)) {
+    const transactions = parseHeaderlessScotiabank(content, accountName);
+    return {
+      transactions,
+      accountName,
+      source: 'scotiabank',
+      count: transactions.length,
+      errors,
+    };
+  }
 
   // Pre-process Amex CSVs to strip metadata rows
   let processedContent = content;
