@@ -170,62 +170,165 @@ function parseChequing(text: string, accountName: string): Transaction[] {
 }
 
 // ─── Parse LOC / Visa Statements ─────────────────────────────────────────────
-// Lines look like:
-//   003 Apr 1   Apr 1   MB - CASH ADVANCE TO - *****02*36 27   2,000.00
-//   023   Mar 7   Mar 8   MIKE'S INDEPENDENT CIT TORONTO ON    134.88
-//   027   Mar 12 Mar 12 MB-CREDIT CARD/LOC PAY. FROM -       1,170.57-  (trailing minus = credit)
+// PDF text extraction produces multi-line blocks per transaction:
+//   003                   ← 3-digit ref#
+//   Apr 1                 ← trans date
+//   Apr 1                 ← post date
+//   MB - CASH ADVANCE     ← description (may span multiple lines)
+//   TO - *****02*36 27
+//   2,000.00              ← CAD amount (trailing minus = credit, e.g. 1,170.57-)
+//
+// Foreign currency entries have extra lines:
+//   SEVEN-ELEVEN TOKYO AMT           172.00 YEN
+//   1.56                  ← CAD amount on next line
+
 function parseLOCVisa(text: string, accountName: string, type: ScotiaType): Transaction[] {
   const lines = text.split('\n');
   const year = extractStatementYear(text);
   const transactions: Transaction[] = [];
 
-  // Match: ref# date1 date2 description amount
-  // The ref# is 3 digits, dates are Mon DD
-  const txRegex = /^\s*(\d{3})\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2})\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2})\s+(.+)/i;
+  const dateRegex = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})$/i;
+  const refRegex = /^\d{3}$/;
+  const amountRegex = /^[\d,]+\.\d{2}-?$/;
+  const skipRegex = /^(SUB-TOTAL|INTEREST CHARGES|Page|Statement|Account|REF|TRANS|POST|DETAILS|AMOUNT|Transactions|Continued|MR |ScotiaLine|Scotiabank|SBVREP|Scene|Based on|Beginning|Points|Ending|Your |For more|If you|Payment|Total|Current|Previous|Interest|Credit|New balance|Overdue|Protect|Please|ACCOUNT|You can|Borrowers|through|TTY|We have|1-|416-|www\.|https:|Review|Other|Agreements|We reserve|earned|\*\*Your|I[Ss]cene|This statement|Annual|On July|estimate|0[0-9]{2}\s)/i;
+  const sectionEndRegex = /^(Interest charges posted|SBVREP|Estimate of)/i;
+
+  // First pass: split into transaction blocks anchored by ref numbers
+  interface TxBlock {
+    refNum: string;
+    lines: string[];
+  }
+  const blocks: TxBlock[] = [];
+  let currentBlock: TxBlock | null = null;
+  let inTransactionSection = false;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const match = line.match(txRegex);
-    if (!match) continue;
+    const line = lines[i].trim();
+    if (!line) continue;
 
-    const transDateStr = match[2]; // e.g. "Apr 1"
-    const dateMatch = transDateStr.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})/i);
-    if (!dateMatch) continue;
+    // Detect start of transaction section
+    if (line.includes('Transactions since') || line.includes('Transactions - continued')) {
+      inTransactionSection = true;
+      continue;
+    }
 
-    const date = resolveDate(dateMatch[1], dateMatch[2], year);
-    if (!date) continue;
+    // End of transaction section
+    if (inTransactionSection && sectionEndRegex.test(line)) {
+      if (currentBlock && currentBlock.lines.length > 0) {
+        blocks.push(currentBlock);
+        currentBlock = null;
+      }
+      inTransactionSection = false;
+      continue;
+    }
 
-    const detailsAndAmount = match[4].trim();
+    if (!inTransactionSection) continue;
 
-    // Extract amount (last number on the line, possibly with trailing minus)
-    const amountMatch = detailsAndAmount.match(/([\d,]+\.\d{2}-?)(?:\s|$)/g);
-    if (!amountMatch) continue;
+    // New transaction block starts with a 3-digit ref number
+    if (refRegex.test(line)) {
+      if (currentBlock && currentBlock.lines.length > 0) {
+        blocks.push(currentBlock);
+      }
+      currentBlock = { refNum: line, lines: [] };
+      continue;
+    }
 
-    // Last amount match is the CAD amount (foreign amounts come before)
-    const lastAmountStr = amountMatch[amountMatch.length - 1].trim();
-    const rawAmount = cleanAmount(lastAmountStr);
+    // Accumulate lines into current block
+    if (currentBlock) {
+      // Skip noise lines
+      if (skipRegex.test(line)) continue;
+      // Skip dollar-prefixed subtotal values (e.g. "$0.00", "$176.52")
+      if (line.startsWith('$')) continue;
+      currentBlock.lines.push(line);
+    }
+  }
+  // Push last block
+  if (currentBlock && currentBlock.lines.length > 0) {
+    blocks.push(currentBlock);
+  }
 
-    // Description is everything before the last amount
-    const lastIdx = detailsAndAmount.lastIndexOf(lastAmountStr.replace('-', ''));
-    let description = detailsAndAmount.substring(0, lastIdx).trim();
+  // Second pass: parse each block into a transaction
+  for (const block of blocks) {
+    const bLines = block.lines;
+    if (bLines.length < 3) continue; // need at least: transDate, postDate, amount
 
-    // Clean up foreign amount text
-    description = description.replace(/AMT\s*[\d,.]+\s*(?:YEN|USD|EUR|GBP|MXN|AUD)\s*/gi, '').trim();
-    description = description.replace(/\s+/g, ' ');
+    // Extract dates (first two date-like lines)
+    let transDate = '';
+    let dateCount = 0;
+    let descStartIdx = 0;
 
-    // Skip interest charges and subtotals
-    if (/INTEREST CHARGES|SUB-TOTAL|TOTAL CREDITS|TOTAL DEBITS/i.test(description)) continue;
+    for (let i = 0; i < Math.min(bLines.length, 4); i++) {
+      const dm = bLines[i].match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})$/i);
+      if (dm) {
+        dateCount++;
+        if (dateCount === 1) {
+          transDate = resolveDate(dm[1], dm[2], year);
+        }
+        descStartIdx = i + 1;
+        if (dateCount >= 2) break;
+      } else if (dateCount === 0) {
+        // Sometimes date is on same line as something else, try partial match
+        const partialDm = bLines[i].match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})/i);
+        if (partialDm) {
+          dateCount++;
+          if (dateCount === 1) {
+            transDate = resolveDate(partialDm[1], partialDm[2], year);
+          }
+          descStartIdx = i + 1;
+        }
+      }
+    }
+
+    if (!transDate) continue;
+
+    // Everything between dates and the last amount is description
+    // The CAD amount is always the last numeric line (format: digits.dd or digits.dd-)
+    let amountStr = '';
+    let amountIdx = -1;
+
+    // Find the last amount-like line in the block
+    for (let i = bLines.length - 1; i >= descStartIdx; i--) {
+      if (amountRegex.test(bLines[i].trim())) {
+        amountStr = bLines[i].trim();
+        amountIdx = i;
+        break;
+      }
+    }
+
+    if (!amountStr || amountIdx < 0) continue;
+
+    // Description is everything between dates and the amount line
+    const descLines: string[] = [];
+    for (let i = descStartIdx; i < amountIdx; i++) {
+      const dl = bLines[i].trim();
+      // Skip pure amount lines that are foreign currency amounts
+      if (amountRegex.test(dl)) continue;
+      descLines.push(dl);
+    }
+
+    let description = descLines.join(' ').trim();
+
+    // Clean up foreign currency info
+    description = description.replace(/AMT\s*[\d,. ]+\s*(?:YEN|USD|EUR|GBP|MXN|AUD|UNIT\s*ED\s*STATES\s*DOL\s*LAR)\s*/gi, '').trim();
+    description = description.replace(/\(SAMSUNG PAY\)/gi, '').trim();
+    description = description.replace(/\s+/g, ' ').trim();
+
+    // Skip interest charges, subtotals, fees, and empty-description fallback entries
+    if (/^(INTEREST CHARGES|SUB-TOTAL|TOTAL CREDITS|TOTAL DEBITS|FOREIGN CASH ADVANCE FEE)/i.test(description)) continue;
+    if (!description || description.startsWith('Transaction ')) continue;
+
+    const rawAmount = cleanAmount(amountStr);
 
     // LOC/Visa: positive amounts = charges (expenses), trailing minus = credits (payments)
     // We want expenses negative, payments positive
-    const amount = lastAmountStr.endsWith('-') ? Math.abs(rawAmount) : -Math.abs(rawAmount);
+    const amount = amountStr.endsWith('-') ? Math.abs(rawAmount) : -Math.abs(rawAmount);
 
     if (amount !== 0) {
       transactions.push({
         id: generateId(),
-        date,
-        description,
-        rawDescription: description,
+        date: transDate,
+        description: description || `Transaction ${block.refNum}`,
+        rawDescription: description || `Transaction ${block.refNum}`,
         amount,
         category: categorizeTransaction(description),
         source: 'scotiabank',
