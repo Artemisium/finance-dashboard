@@ -53,24 +53,79 @@ export function loadData(): AppData {
 
 export function saveData(data: AppData): void {
   if (typeof window === 'undefined') return;
+  const updated = { ...data, lastUpdated: new Date().toISOString() };
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, lastUpdated: new Date().toISOString() }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   } catch (e) {
     console.error('Failed to save data', e);
   }
+  // Auto-sync to server in background (fire and forget)
+  syncToServer(updated).catch(() => {});
+}
+
+// ─── Server sync ─────────────────────────────────────────────────────────────
+
+async function syncToServer(data: AppData): Promise<void> {
+  try {
+    await fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  } catch {
+    // Server unavailable — localStorage is the fallback
+  }
+}
+
+
+function txFingerprint(t: { date: string; amount: number; description: string; account?: string }): string {
+  // Normalize description: lowercase, collapse whitespace, trim
+  const desc = t.description.toLowerCase().replace(/\s+/g, ' ').trim();
+  return `${t.date}|${t.amount}|${desc}|${t.account || ''}`;
 }
 
 export function mergeTransactions(existing: Transaction[], incoming: Transaction[]): Transaction[] {
-  // Deduplicate by date + amount + description combo
-  const existingKeys = new Set(
-    existing.map((t) => `${t.date}|${t.amount}|${t.description}`)
-  );
-  const newOnes = incoming.filter(
-    (t) => !existingKeys.has(`${t.date}|${t.amount}|${t.description}`)
-  );
+  // Deduplicate by date + amount + normalized description + account
+  const existingKeys = new Set(existing.map(txFingerprint));
+  const newOnes = incoming.filter((t) => !existingKeys.has(txFingerprint(t)));
   return [...existing, ...newOnes].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
+}
+
+export interface DuplicateGroup {
+  fingerprint: string;
+  transactions: Transaction[];
+}
+
+export function findDuplicates(transactions: Transaction[]): DuplicateGroup[] {
+  const groups: Record<string, Transaction[]> = {};
+  transactions.forEach((t) => {
+    const key = txFingerprint(t);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(t);
+  });
+  return Object.entries(groups)
+    .filter(([, txns]) => txns.length > 1)
+    .map(([fingerprint, txns]) => ({ fingerprint, transactions: txns }))
+    .sort((a, b) => b.transactions.length - a.transactions.length);
+}
+
+export function removeDuplicates(data: AppData): { data: AppData; removed: number } {
+  const seen = new Set<string>();
+  const unique: Transaction[] = [];
+  let removed = 0;
+  // Keep the first occurrence, remove subsequent duplicates
+  for (const t of data.transactions) {
+    const key = txFingerprint(t);
+    if (seen.has(key)) {
+      removed++;
+    } else {
+      seen.add(key);
+      unique.push(t);
+    }
+  }
+  return { data: { ...data, transactions: unique }, removed };
 }
 
 // ─── Utility helpers ──────────────────────────────────────────────────────────
@@ -82,12 +137,23 @@ export function getTransactionsByMonth(transactions: Transaction[], year: number
   });
 }
 
+const EXCLUDED_FROM_SPENDING = ['Transfers', 'Investments', 'Debt Payment'];
+const EXCLUDED_FROM_INCOME = ['Transfers', 'Investments', 'Reimbursement'];
+
 export function getExpenses(transactions: Transaction[]): Transaction[] {
-  return transactions.filter((t) => t.amount < 0 && t.category !== 'Transfers' && t.category !== 'Investments');
+  return transactions.filter((t) => t.amount < 0 && !EXCLUDED_FROM_SPENDING.includes(t.category));
 }
 
 export function getIncome(transactions: Transaction[]): Transaction[] {
-  return transactions.filter((t) => t.amount > 0 && t.category !== 'Transfers' && t.category !== 'Investments');
+  return transactions.filter((t) => t.amount > 0 && !EXCLUDED_FROM_INCOME.includes(t.category));
+}
+
+export function getDebtPayments(transactions: Transaction[]): Transaction[] {
+  return transactions.filter((t) => t.category === 'Debt Payment');
+}
+
+export function getReimbursements(transactions: Transaction[]): Transaction[] {
+  return transactions.filter((t) => t.category === 'Reimbursement');
 }
 
 export function sumAmount(transactions: Transaction[]): number {
@@ -105,7 +171,8 @@ export function getMonthlyTotals(transactions: Transaction[]): { month: string; 
   const map: Record<string, { income: number; expenses: number }> = {};
 
   transactions.forEach((t) => {
-    if (t.category === 'Transfers' || t.category === 'Investments') return;
+    if (EXCLUDED_FROM_SPENDING.includes(t.category) && t.amount < 0) return;
+    if (EXCLUDED_FROM_INCOME.includes(t.category) && t.amount > 0) return;
     const key = t.date.substring(0, 7); // "YYYY-MM"
     if (!map[key]) map[key] = { income: 0, expenses: 0 };
     if (t.amount > 0) map[key].income += t.amount;

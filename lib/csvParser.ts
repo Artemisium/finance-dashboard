@@ -86,7 +86,7 @@ function parseScotiabank(rows: Record<string, string>[], accountName: string): T
         description: description.trim(),
         rawDescription: description.trim(),
         amount,
-        category: categorizeTransaction(description),
+        category: categorizeTransaction(description, amount),
         source: 'scotiabank',
         account: accountName,
       };
@@ -123,7 +123,7 @@ function parseAmex(rows: Record<string, string>[], accountName: string): Transac
         description,
         rawDescription: description,
         amount,
-        category: categorizeTransaction(description),
+        category: categorizeTransaction(description, amount),
         source: 'amex',
         account: accountName,
       };
@@ -244,7 +244,7 @@ function parseHeaderlessScotiabank(content: string, accountName: string): Transa
         description,
         rawDescription: description,
         amount,
-        category: categorizeTransaction(description),
+        category: categorizeTransaction(description, amount),
         source: 'scotiabank' as DataSource,
         account: accountName,
       };

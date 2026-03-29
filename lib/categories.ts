@@ -25,6 +25,8 @@ export const CATEGORIES = [
   'Education',
   'Investments',
   'Transfers',
+  'Debt Payment',
+  'Reimbursement',
   'Income',
   'ATM & Cash',
   'Fees & Charges',
@@ -134,7 +136,11 @@ const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
     category: 'Investments',
   },
   {
-    keywords: ['transfer', 'e-transfer', 'interac', 'send money', 'wire', 'zelle', 'paypal transfer'],
+    keywords: ['payment thank you', 'payment - thank', 'payment received', 'payment - bill', 'bill payment', 'loan payment', 'loc payment', 'line of credit payment', 'credit card payment', 'visa payment', 'mastercard payment', 'amex payment', 'payment - pmt'],
+    category: 'Debt Payment',
+  },
+  {
+    keywords: ['transfer', 'send money', 'wire', 'zelle', 'paypal transfer'],
     category: 'Transfers',
   },
   {
@@ -159,8 +165,18 @@ const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
   },
 ];
 
-export function categorizeTransaction(description: string): string {
+export function categorizeTransaction(description: string, amount?: number): string {
   const lower = description.toLowerCase();
+
+  // Incoming e-transfers (positive amount) → Reimbursement
+  if (amount !== undefined && amount > 0 && (lower.includes('e-transfer') || lower.includes('interac') || lower.includes('etransfer'))) {
+    return 'Reimbursement';
+  }
+  // Outgoing e-transfers (negative amount) → Transfers
+  if (amount !== undefined && amount < 0 && (lower.includes('e-transfer') || lower.includes('interac') || lower.includes('etransfer'))) {
+    return 'Transfers';
+  }
+
   for (const rule of CATEGORY_RULES) {
     if (rule.keywords.some((kw) => lower.includes(kw))) {
       return rule.category;
@@ -196,6 +212,8 @@ export const CATEGORY_COLORS: Record<string, string> = {
   'Education': '#6366f1',
   'Investments': '#10b981',
   'Transfers': '#71717a',
+  'Debt Payment': '#94a3b8',
+  'Reimbursement': '#a3e635',
   'Income': '#22c55e',
   'ATM & Cash': '#a3a3a3',
   'Fees & Charges': '#dc2626',

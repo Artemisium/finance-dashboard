@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
-import { Trash2, AlertTriangle, Search, Filter, Database, ChevronDown, ChevronUp } from 'lucide-react';
-import { loadData, saveData, wipeTransactionsByAccount, deleteTransaction, getUniqueAccounts } from '@/lib/store';
+import { Trash2, AlertTriangle, Search, Filter, Database, ChevronDown, ChevronUp, Copy } from 'lucide-react';
+import { loadData, saveData, wipeTransactionsByAccount, deleteTransaction, getUniqueAccounts, findDuplicates, removeDuplicates } from '@/lib/store';
 import { AppData, Transaction } from '@/lib/types';
 
 function fmt(n: number): string {
@@ -127,6 +127,17 @@ export default function DataManagementPage() {
     });
   }
 
+  const duplicateGroups = useMemo(() => findDuplicates(data.transactions), [data.transactions]);
+  const totalDuplicates = duplicateGroups.reduce((s, g) => s + g.transactions.length - 1, 0);
+
+  function handleRemoveDuplicates() {
+    if (!data) return;
+    const result = removeDuplicates(data);
+    saveData(result.data);
+    setData(result.data);
+    setSelectedIds(new Set());
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -175,6 +186,44 @@ export default function DataManagementPage() {
           </div>
         ))}
       </div>
+
+      {/* Duplicate detection */}
+      {totalDuplicates > 0 && (
+        <div className="card p-4 border border-amber-500/20 bg-amber-500/5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Copy className="w-5 h-5 text-amber-400" />
+              <div>
+                <p className="text-text-primary text-sm font-medium">
+                  {totalDuplicates} duplicate{totalDuplicates !== 1 ? 's' : ''} detected
+                </p>
+                <p className="text-text-muted text-xs">
+                  {duplicateGroups.length} group{duplicateGroups.length !== 1 ? 's' : ''} of matching transactions (same date, amount, description, account)
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleRemoveDuplicates}
+              className="flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-4 h-4" /> Remove All Duplicates
+            </button>
+          </div>
+          <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto">
+            {duplicateGroups.slice(0, 10).map((g) => (
+              <div key={g.fingerprint} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-bg-hover/50">
+                <span className="text-text-secondary truncate flex-1">
+                  {g.transactions[0].description} — {format(new Date(g.transactions[0].date), 'MMM d, yyyy')} — {fmt(g.transactions[0].amount)}
+                </span>
+                <span className="text-amber-400 font-medium ml-2">{g.transactions.length}x</span>
+              </div>
+            ))}
+            {duplicateGroups.length > 10 && (
+              <p className="text-text-muted text-xs pl-2">...and {duplicateGroups.length - 10} more groups</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Bulk actions bar */}
       <div className="card p-4">

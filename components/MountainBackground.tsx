@@ -2,47 +2,67 @@ export default function MountainBackground() {
   return (
     <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
       <svg
-        className="absolute bottom-0 left-0 w-full"
-        viewBox="0 0 1440 320"
+        className="absolute bottom-0 left-0 w-full h-[45vh]"
+        viewBox="0 0 1440 400"
         preserveAspectRatio="none"
         xmlns="http://www.w3.org/2000/svg"
       >
-        {/* Back range - farthest mountains, most subtle */}
+        <defs>
+          {/* Back range gradient - most distant */}
+          <linearGradient id="mountain-back" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#1a1a35" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#0d0d1e" stopOpacity="0.6" />
+          </linearGradient>
+          {/* Mid range gradient */}
+          <linearGradient id="mountain-mid" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#171730" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#0c0c1a" stopOpacity="0.7" />
+          </linearGradient>
+          {/* Front range gradient - closest */}
+          <linearGradient id="mountain-front" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#13132a" stopOpacity="0.7" />
+            <stop offset="100%" stopColor="#0a0a18" stopOpacity="0.9" />
+          </linearGradient>
+          {/* Foreground ridge */}
+          <linearGradient id="mountain-fore" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0f0f22" stopOpacity="0.85" />
+            <stop offset="100%" stopColor="#080814" stopOpacity="0.95" />
+          </linearGradient>
+        </defs>
+
+        {/* Back range - farthest mountains, tallest peaks */}
         <path
-          d="M0 320 L0 240 L80 200 L160 220 L240 170 L340 190 L420 140 L520 160 L600 110 L700 130 L780 90 L880 115 L960 80 L1060 100 L1140 70 L1240 95 L1320 75 L1440 100 L1440 320 Z"
-          fill="none"
-          stroke="#1e1e3a"
-          strokeWidth="1"
-          opacity="0.5"
+          d="M0 400 L0 180 L60 160 L120 175 L200 120 L280 145 L360 90 L440 110 L520 65 L600 85 L680 50 L760 75 L840 40 L920 60 L1000 30 L1080 55 L1160 45 L1240 70 L1320 50 L1440 80 L1440 400 Z"
+          fill="url(#mountain-back)"
         />
-        {/* Mid range */}
+
+        {/* Mid range - medium peaks */}
         <path
-          d="M0 320 L0 270 L60 250 L130 265 L200 230 L280 245 L360 200 L460 220 L540 185 L640 205 L720 160 L820 180 L900 155 L1000 175 L1080 145 L1180 165 L1260 135 L1360 150 L1440 140 L1440 320 Z"
-          fill="none"
-          stroke="#252545"
-          strokeWidth="1"
-          opacity="0.6"
+          d="M0 400 L0 230 L80 210 L160 225 L250 185 L340 200 L430 155 L520 175 L610 140 L700 160 L790 120 L880 145 L970 110 L1060 135 L1150 100 L1240 125 L1330 105 L1440 130 L1440 400 Z"
+          fill="url(#mountain-mid)"
         />
-        {/* Front range - closest, most visible */}
+
+        {/* Front range - closer, lower peaks */}
         <path
-          d="M0 320 L0 295 L70 280 L150 290 L230 265 L310 278 L400 250 L490 268 L580 240 L670 258 L760 225 L850 248 L940 220 L1030 242 L1120 215 L1210 238 L1300 210 L1380 228 L1440 215 L1440 320 Z"
-          fill="#0d0d1e"
-          stroke="#2d2d55"
-          strokeWidth="1.5"
-          opacity="0.8"
+          d="M0 400 L0 285 L90 265 L180 280 L270 245 L370 260 L460 225 L550 245 L640 210 L730 235 L820 200 L910 225 L1000 195 L1090 218 L1180 188 L1270 210 L1360 190 L1440 205 L1440 400 Z"
+          fill="url(#mountain-front)"
         />
-        {/* Foreground ridge */}
+
+        {/* Foreground ridge - nearest, lowest */}
         <path
-          d="M0 320 L0 305 L100 295 L200 308 L320 290 L440 302 L560 285 L680 298 L800 278 L920 295 L1040 272 L1160 288 L1280 270 L1440 285 L1440 320 Z"
-          fill="#0a0a14"
-          stroke="#242440"
-          strokeWidth="1"
-          opacity="0.9"
+          d="M0 400 L0 330 L100 315 L200 328 L320 305 L440 318 L560 295 L680 310 L800 288 L920 305 L1040 282 L1160 298 L1280 278 L1440 295 L1440 400 Z"
+          fill="url(#mountain-fore)"
         />
       </svg>
 
-      {/* Subtle gradient vignette at bottom */}
-      <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-bg-primary to-transparent opacity-60" />
+      {/* Gradient blend into page background */}
+      <div className="absolute bottom-0 left-0 w-full h-24 bg-gradient-to-t from-bg-primary to-transparent" />
+
+      {/* Subtle stars / ambient dots */}
+      <div className="absolute inset-0 opacity-[0.03]" style={{
+        backgroundImage: 'radial-gradient(1px 1px at 20px 30px, #ffffff, transparent), radial-gradient(1px 1px at 40px 70px, #ffffff, transparent), radial-gradient(1px 1px at 80px 40px, #ffffff, transparent), radial-gradient(1px 1px at 130px 80px, #ffffff, transparent), radial-gradient(1px 1px at 200px 50px, #ffffff, transparent)',
+        backgroundSize: '250px 120px',
+      }} />
     </div>
   );
 }

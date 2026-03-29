@@ -154,7 +154,7 @@ function parseChequing(text: string, accountName: string): Transaction[] {
           description: description.replace(/\s+/g, ' ').trim(),
           rawDescription: description.replace(/\s+/g, ' ').trim(),
           amount,
-          category: categorizeTransaction(description),
+          category: categorizeTransaction(description, amount),
           source: 'scotiabank',
           account: accountName,
         });
@@ -274,7 +274,7 @@ function parseLOCVisa(text: string, accountName: string, type: ScotiaType): Tran
         description,
         rawDescription: description,
         amount,
-        category: categorizeTransaction(description),
+        category: categorizeTransaction(description, amount),
         source: 'scotiabank',
         account: accountName,
       });
