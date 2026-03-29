@@ -26,12 +26,15 @@ export default function DataManagementPage() {
 
   if (!data) return null;
 
-  const accounts = getUniqueAccounts(data.transactions);
-  const sources = Array.from(new Set(data.transactions.map((t) => t.source))).sort();
+  const txns = data.transactions || [];
+  const accounts = getUniqueAccounts(txns);
+  const sourceSet: Record<string, boolean> = {};
+  txns.forEach((t) => { if (t.source) sourceSet[t.source] = true; });
+  const sources = Object.keys(sourceSet).sort();
 
   // Filtered transactions
   const filtered = useMemo(() => {
-    return data.transactions.filter((t) => {
+    return txns.filter((t) => {
       if (filterAccount !== 'all' && t.account !== filterAccount) return false;
       if (filterSource !== 'all' && t.source !== filterSource) return false;
       if (search) {
@@ -40,7 +43,7 @@ export default function DataManagementPage() {
       }
       return true;
     });
-  }, [data.transactions, filterAccount, filterSource, search]);
+  }, [txns, filterAccount, filterSource, search]);
 
   // Group by month
   const groupedByMonth = useMemo(() => {
@@ -64,12 +67,12 @@ export default function DataManagementPage() {
   // Account stats
   const accountStats = useMemo(() => {
     const map: Record<string, { count: number; source: string }> = {};
-    data.transactions.forEach((t) => {
-      if (!map[t.account]) map[t.account] = { count: 0, source: t.source };
+    txns.forEach((t) => {
+      if (!map[t.account]) map[t.account] = { count: 0, source: t.source || 'unknown' };
       map[t.account].count++;
     });
     return Object.entries(map).sort(([, a], [, b]) => b.count - a.count);
-  }, [data.transactions]);
+  }, [txns]);
 
   function handleWipeAccount(account: string) {
     if (!data) return;
@@ -127,7 +130,7 @@ export default function DataManagementPage() {
     });
   }
 
-  const duplicateGroups = useMemo(() => findDuplicates(data.transactions), [data.transactions]);
+  const duplicateGroups = useMemo(() => findDuplicates(txns), [txns]);
   const totalDuplicates = duplicateGroups.reduce((s, g) => s + g.transactions.length - 1, 0);
 
   function handleRemoveDuplicates() {
@@ -144,7 +147,7 @@ export default function DataManagementPage() {
       <div>
         <h1 className="text-2xl font-semibold text-text-primary">Data Management</h1>
         <p className="text-text-secondary text-sm mt-0.5">
-          {data.transactions.length.toLocaleString()} transactions across {accounts.length} accounts
+          {txns.length.toLocaleString()} transactions across {accounts.length} accounts
         </p>
       </div>
 
@@ -298,7 +301,7 @@ export default function DataManagementPage() {
         </div>
 
         <p className="text-text-muted text-xs mt-2">
-          Showing {filtered.length.toLocaleString()} of {data.transactions.length.toLocaleString()} transactions
+          Showing {filtered.length.toLocaleString()} of {txns.length.toLocaleString()} transactions
         </p>
       </div>
 
