@@ -16,7 +16,8 @@
     "papaparse": "^5.4.1",
     "date-fns": "^3.6.0",
     "lucide-react": "^0.383.0",
-    "clsx": "^2.1.1"
+    "clsx": "^2.1.1",
+    "@vercel/kv": "^1.0.1"
   },
   "devDependencies": {
     "@types/node": "^20",

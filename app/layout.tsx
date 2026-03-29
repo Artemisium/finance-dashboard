@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import MountainBackground from '@/components/MountainBackground';
+import DataSync from '@/components/DataSync';
 
 export const metadata: Metadata = {
   title: 'FinanceOS',
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="bg-bg-primary text-text-primary min-h-screen">
         <MountainBackground />
+        <DataSync />
         <Sidebar />
         <main className="ml-56 min-h-screen relative z-10">
           <div className="p-8 max-w-7xl">
