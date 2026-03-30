@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { format } from 'date-fns';
-import { Trash2, AlertTriangle, Search, Filter, Database, ChevronDown, ChevronUp, Copy, Plus, X, Zap, Tag } from 'lucide-react';
+import { format, subMonths } from 'date-fns';
+import { Trash2, AlertTriangle, Search, Filter, Database, ChevronDown, ChevronUp, Copy, Plus, X, Zap, Tag, ArrowUpDown, Calendar } from 'lucide-react';
 import {
   loadData, saveData, wipeTransactionsByAccount, deleteTransaction,
   getUniqueAccounts, findDuplicates, removeDuplicates,
@@ -18,6 +18,55 @@ function generateId() { return Math.random().toString(36).substring(2) + Date.no
 
 type TabId = 'transactions' | 'rules';
 
+function TransactionRow({ t, selectedIds, toggleSelect, handleChangeCategory, handleDeleteOne }: {
+  t: Transaction;
+  selectedIds: Set<string>;
+  toggleSelect: (id: string) => void;
+  handleChangeCategory: (id: string, cat: string) => void;
+  handleDeleteOne: (id: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-5 py-2.5 hover:bg-bg-hover/50 transition-colors">
+      <input
+        type="checkbox"
+        checked={selectedIds.has(t.id)}
+        onChange={() => toggleSelect(t.id)}
+        className="accent-accent-teal w-3.5 h-3.5 flex-shrink-0"
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-text-primary text-sm truncate">{t.description}</span>
+          <select
+            value={t.category}
+            onChange={(e) => handleChangeCategory(t.id, e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs px-1.5 py-0.5 rounded border-0 bg-bg-hover text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent-teal cursor-pointer flex-shrink-0"
+            style={{ borderLeft: `3px solid ${CATEGORY_COLORS[t.category] || '#6b7280'}` }}
+          >
+            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-2 text-text-muted text-xs mt-0.5">
+          <span>{format(new Date(t.date), 'MMM d, yyyy')}</span>
+          <span>·</span>
+          <span>{t.account}</span>
+          <span>·</span>
+          <span>{t.source}</span>
+        </div>
+      </div>
+      <span className={`text-sm font-medium flex-shrink-0 ${t.amount < 0 ? 'text-accent-red' : 'text-accent-teal'}`}>
+        {fmt(t.amount)}
+      </span>
+      <button
+        onClick={() => handleDeleteOne(t.id)}
+        className="p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-accent-red transition-colors flex-shrink-0"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
 export default function DataManagementPage() {
   const [data, setData] = useState<AppData | null>(null);
   const [search, setSearch] = useState('');
@@ -29,6 +78,11 @@ export default function DataManagementPage() {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<TabId>('transactions');
+  // Sort & date range
+  const [sortBy, setSortBy] = useState<'date' | 'amount-asc' | 'amount-desc'>('date');
+  const [dateRange, setDateRange] = useState<'all' | '1m' | '3m' | '6m' | '12m' | 'custom'>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   // Rules form state
   const [newRuleKeyword, setNewRuleKeyword] = useState('');
   const [newRuleCategory, setNewRuleCategory] = useState('Transfers');
@@ -51,22 +105,44 @@ export default function DataManagementPage() {
     return Array.from(cats).sort();
   }, [transactions]);
 
+  // Date range bounds
+  const dateRangeBounds = useMemo(() => {
+    if (dateRange === 'all') return { from: '', to: '' };
+    if (dateRange === 'custom') return { from: customFrom, to: customTo };
+    const now = new Date();
+    const months = dateRange === '1m' ? 1 : dateRange === '3m' ? 3 : dateRange === '6m' ? 6 : 12;
+    const from = format(subMonths(now, months), 'yyyy-MM-dd');
+    return { from, to: '' };
+  }, [dateRange, customFrom, customTo]);
+
   // Filtered transactions
   const filtered = useMemo(() => {
     return transactions.filter((t) => {
       if (filterAccount !== 'all' && t.account !== filterAccount) return false;
       if (filterSource !== 'all' && t.source !== filterSource) return false;
       if (filterCategory !== 'all' && t.category !== filterCategory) return false;
+      if (dateRangeBounds.from && t.date < dateRangeBounds.from) return false;
+      if (dateRangeBounds.to && t.date > dateRangeBounds.to) return false;
       if (search) {
         const s = search.toLowerCase();
         if (!t.description.toLowerCase().includes(s) && !t.category.toLowerCase().includes(s) && !t.date.includes(s)) return false;
       }
       return true;
     });
-  }, [transactions, filterAccount, filterSource, filterCategory, search]);
+  }, [transactions, filterAccount, filterSource, filterCategory, dateRangeBounds, search]);
 
-  // Group by month
+  // Sorted flat list (for amount sort modes)
+  const sortedFlat = useMemo(() => {
+    const copy = [...filtered];
+    if (sortBy === 'amount-desc') copy.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    else if (sortBy === 'amount-asc') copy.sort((a, b) => Math.abs(a.amount) - Math.abs(b.amount));
+    else copy.sort((a, b) => b.date.localeCompare(a.date));
+    return copy;
+  }, [filtered, sortBy]);
+
+  // Group by month (only used in date sort mode)
   const groupedByMonth = useMemo(() => {
+    if (sortBy !== 'date') return [];
     const map: Record<string, Transaction[]> = {};
     filtered.forEach((t) => {
       const key = t.date.substring(0, 7);
@@ -82,7 +158,7 @@ export default function DataManagementPage() {
         total: txns.reduce((s, t) => s + t.amount, 0),
         count: txns.length,
       }));
-  }, [filtered]);
+  }, [filtered, sortBy]);
 
   // Account stats
   const accountStats = useMemo(() => {
@@ -387,6 +463,55 @@ export default function DataManagementPage() {
               </div>
             </div>
 
+            {/* Sort & Date Range row */}
+            <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-border">
+              <div className="flex items-center gap-2">
+                <ArrowUpDown className="w-4 h-4 text-text-muted" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                  className="bg-bg-hover border border-border text-text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent-teal"
+                >
+                  <option value="date">Sort by Date</option>
+                  <option value="amount-desc">Largest Amount First</option>
+                  <option value="amount-asc">Smallest Amount First</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-text-muted" />
+                <select
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
+                  className="bg-bg-hover border border-border text-text-primary text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent-teal"
+                >
+                  <option value="all">All Time</option>
+                  <option value="1m">Last Month</option>
+                  <option value="3m">Last 3 Months</option>
+                  <option value="6m">Last 6 Months</option>
+                  <option value="12m">Last 12 Months</option>
+                  <option value="custom">Custom Range</option>
+                </select>
+                {dateRange === 'custom' && (
+                  <>
+                    <input
+                      type="date"
+                      value={customFrom}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                      className="bg-bg-hover border border-border text-text-primary text-xs rounded-lg px-2 py-2 focus:outline-none focus:border-accent-teal"
+                    />
+                    <span className="text-text-muted text-xs">to</span>
+                    <input
+                      type="date"
+                      value={customTo}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                      className="bg-bg-hover border border-border text-text-primary text-xs rounded-lg px-2 py-2 focus:outline-none focus:border-accent-teal"
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+
             {/* Selection actions */}
             {selectedIds.size > 0 && (
               <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-border">
@@ -450,14 +575,16 @@ export default function DataManagementPage() {
             </div>
           </div>
 
-          {/* Transaction list grouped by month */}
+          {/* Transaction list */}
           <div className="space-y-3">
-            {groupedByMonth.length === 0 && (
+            {filtered.length === 0 && (
               <div className="card p-12 text-center">
                 <p className="text-text-muted text-sm">No transactions found</p>
               </div>
             )}
-            {groupedByMonth.map(({ month, label, transactions: txns, total, count }) => {
+
+            {/* ── Grouped by month (date sort) ── */}
+            {sortBy === 'date' && groupedByMonth.map(({ month, label, transactions: txns, total, count }) => {
               const isExpanded = expandedMonth === month;
               const monthAllSelected = txns.every((t) => selectedIds.has(t.id));
               return (
@@ -488,51 +615,30 @@ export default function DataManagementPage() {
                   {isExpanded && (
                     <div className="border-t border-border divide-y divide-border/50">
                       {txns.map((t) => (
-                        <div key={t.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-bg-hover/50 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(t.id)}
-                            onChange={() => toggleSelect(t.id)}
-                            className="accent-accent-teal w-3.5 h-3.5 flex-shrink-0"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-text-primary text-sm truncate">{t.description}</span>
-                              {/* Inline category dropdown */}
-                              <select
-                                value={t.category}
-                                onChange={(e) => handleChangeCategory(t.id, e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-xs px-1.5 py-0.5 rounded border-0 bg-bg-hover text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent-teal cursor-pointer flex-shrink-0"
-                                style={{ borderLeft: `3px solid ${CATEGORY_COLORS[t.category] || '#6b7280'}` }}
-                              >
-                                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                              </select>
-                            </div>
-                            <div className="flex items-center gap-2 text-text-muted text-xs mt-0.5">
-                              <span>{format(new Date(t.date), 'MMM d, yyyy')}</span>
-                              <span>·</span>
-                              <span>{t.account}</span>
-                              <span>·</span>
-                              <span>{t.source}</span>
-                            </div>
-                          </div>
-                          <span className={`text-sm font-medium flex-shrink-0 ${t.amount < 0 ? 'text-accent-red' : 'text-accent-teal'}`}>
-                            {fmt(t.amount)}
-                          </span>
-                          <button
-                            onClick={() => handleDeleteOne(t.id)}
-                            className="p-1.5 rounded hover:bg-bg-hover text-text-muted hover:text-accent-red transition-colors flex-shrink-0"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        <TransactionRow key={t.id} t={t} selectedIds={selectedIds} toggleSelect={toggleSelect} handleChangeCategory={handleChangeCategory} handleDeleteOne={handleDeleteOne} />
                       ))}
                     </div>
                   )}
                 </div>
               );
             })}
+
+            {/* ── Flat list (amount sort) ── */}
+            {sortBy !== 'date' && filtered.length > 0 && (
+              <div className="card overflow-hidden">
+                <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+                  <span className="text-text-secondary text-sm font-medium">
+                    {sortBy === 'amount-desc' ? 'Largest first' : 'Smallest first'}
+                  </span>
+                  <span className="text-text-muted text-xs">{sortedFlat.length} transactions</span>
+                </div>
+                <div className="divide-y divide-border/50 max-h-[70vh] overflow-y-auto">
+                  {sortedFlat.map((t) => (
+                    <TransactionRow key={t.id} t={t} selectedIds={selectedIds} toggleSelect={toggleSelect} handleChangeCategory={handleChangeCategory} handleDeleteOne={handleDeleteOne} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
