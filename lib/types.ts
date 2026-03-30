@@ -74,6 +74,13 @@ export interface SalarySettings {
   employer: string;
 }
 
+export interface CategoryRule {
+  id: string;
+  keyword: string;        // substring match (case-insensitive)
+  category: string;       // target category
+  enabled: boolean;
+}
+
 export interface AppData {
   transactions: Transaction[];
   accounts: Account[];
@@ -82,5 +89,6 @@ export interface AppData {
   incomeEntries: IncomeEntry[];
   taxSettings: TaxSettings;
   salarySettings: SalarySettings;
+  categoryRules: CategoryRule[];
   lastUpdated: string;
 }

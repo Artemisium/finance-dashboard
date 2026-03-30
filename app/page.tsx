@@ -1,14 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
+import { useState, useEffect, useMemo } from 'react';
+import { format, subMonths } from 'date-fns';
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts';
-import { TrendingUp, TrendingDown, Wallet, CreditCard, RefreshCw, AlertCircle } from 'lucide-react';
-import { loadData, getExpenses, getIncome, sumAmount, getMonthlyTotals, groupByCategory } from '@/lib/store';
-import { AppData, Transaction } from '@/lib/types';
+import { ArrowRightLeft, RefreshCw, AlertCircle, DollarSign, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import {
+  loadData, groupByCategory,
+  estimateTax, getMonthlyMoneyFlow, isRealExpense, isTransferPayment,
+} from '@/lib/store';
+import { AppData } from '@/lib/types';
 import { CATEGORY_COLORS } from '@/lib/categories';
 
 function fmt(n: number): string {
@@ -16,9 +19,9 @@ function fmt(n: number): string {
 }
 
 function StatCard({
-  label, value, sub, icon: Icon, positive,
+  label, value, sub, icon: Icon, positive, accent,
 }: {
-  label: string; value: string; sub?: string; icon: React.ElementType; positive?: boolean;
+  label: string; value: string; sub?: string; icon: React.ElementType; positive?: boolean; accent?: string;
 }) {
   return (
     <div className="card p-5">
@@ -28,7 +31,9 @@ function StatCard({
           <Icon className="w-4 h-4 text-text-secondary" />
         </div>
       </div>
-      <div className={`text-2xl font-semibold ${positive === true ? 'text-accent-teal' : positive === false ? 'text-accent-red' : 'text-text-primary'}`}>
+      <div className={`text-2xl font-semibold ${
+        accent ? accent : positive === true ? 'text-accent-teal' : positive === false ? 'text-accent-red' : 'text-text-primary'
+      }`}>
         {value}
       </div>
       {sub && <div className="text-text-muted text-xs mt-1">{sub}</div>}
@@ -58,38 +63,73 @@ export default function OverviewPage() {
     setData(loadData());
   }, []);
 
-  if (!data) return null;
+  // All hooks before early return
+  const taxEst = useMemo(() => {
+    if (!data) return { federal: 0, provincial: 0, cpp: 0, ei: 0, total: 0, effectiveRate: 0, netIncome: 0 };
+    const annualTotal = data.salarySettings.annualSalary + data.salarySettings.annualBonus;
+    return estimateTax(annualTotal, data.taxSettings.ytdRrspContributions);
+  }, [data]);
 
-  const { transactions, accounts, recurringExpenses } = data;
-
-  const hasData = transactions.length > 0;
-
-  // Current month stats
   const year = selectedMonth.getFullYear();
   const month = selectedMonth.getMonth();
-  const monthTx = transactions.filter((t) => {
-    const d = new Date(t.date);
-    return d.getFullYear() === year && d.getMonth() === month;
-  });
 
-  const monthExpenses = Math.abs(sumAmount(getExpenses(monthTx)));
-  const monthIncome = sumAmount(getIncome(monthTx));
-  const monthNet = monthIncome - monthExpenses;
+  const moneyFlow = useMemo(() => {
+    if (!data) return { netSalary: 0, otherIncome: 0, reimbursements: 0, totalMoneyIn: 0, realExpenses: 0, transferPayments: 0, totalMoneyOut: 0, netCashFlow: 0 };
+    return getMonthlyMoneyFlow(data.transactions, data.salarySettings, month, year, taxEst);
+  }, [data, month, year, taxEst]);
+
+  // 12-month trend data
+  const trendData = useMemo(() => {
+    if (!data) return [];
+    return Array.from({ length: 12 }, (_, i) => {
+      const d = subMonths(new Date(), 11 - i);
+      const m = d.getMonth();
+      const y = d.getFullYear();
+      const flow = getMonthlyMoneyFlow(data.transactions, data.salarySettings, m, y, taxEst);
+      return {
+        month: format(d, 'MMM'),
+        moneyIn: flow.totalMoneyIn,
+        realExpenses: flow.realExpenses,
+        transfers: flow.transferPayments,
+        net: flow.netCashFlow,
+      };
+    });
+  }, [data, taxEst]);
+
+  // Current month transactions
+  const monthTx = useMemo(() => {
+    if (!data) return [];
+    return data.transactions.filter((t) => {
+      const d = new Date(t.date);
+      return d.getFullYear() === year && d.getMonth() === month;
+    });
+  }, [data, year, month]);
+
+  // Top real spending categories this month
+  const topCategories = useMemo(() => {
+    const realExpenseTx = monthTx.filter(isRealExpense);
+    const byCat = groupByCategory(realExpenseTx);
+    return Object.entries(byCat)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6);
+  }, [monthTx]);
+
+  // Transfer breakdown this month
+  const transferBreakdown = useMemo(() => {
+    const transferTx = monthTx.filter((t) => t.amount < 0 && isTransferPayment(t));
+    const byCat = groupByCategory(transferTx);
+    return Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  }, [monthTx]);
+
+  if (!data) return null;
+
+  const { transactions, accounts, recurringExpenses, salarySettings } = data;
+  const hasData = transactions.length > 0;
 
   // Net worth
   const totalAssets = accounts.filter(a => a.balance > 0).reduce((s, a) => s + a.balance, 0);
   const totalLiabilities = accounts.filter(a => a.balance < 0).reduce((s, a) => s + Math.abs(a.balance), 0);
   const netWorth = totalAssets - totalLiabilities;
-
-  // Monthly trend (last 12 months)
-  const monthlyTotals = getMonthlyTotals(transactions).slice(-12);
-
-  // Top spending categories this month
-  const monthExpenseTx = getExpenses(monthTx);
-  const byCat = groupByCategory(monthExpenseTx);
-  const topCategories = Object.entries(byCat)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
 
   // Recent transactions
   const recent = [...transactions].slice(0, 8);
@@ -152,91 +192,195 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* Stat cards */}
+      {/* ═══ Money In / Money Out summary cards ═══ */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Net Worth" value={fmt(netWorth)} sub={`${accounts.length} accounts`} icon={Wallet} positive={netWorth > 0} />
-        <StatCard label="Monthly Income" value={fmt(monthIncome)} sub={format(selectedMonth, 'MMMM yyyy')} icon={TrendingUp} positive={true} />
-        <StatCard label="Monthly Expenses" value={fmt(monthExpenses)} sub={format(selectedMonth, 'MMMM yyyy')} icon={TrendingDown} positive={false} />
+        <StatCard
+          label="Money In"
+          value={fmt(moneyFlow.totalMoneyIn)}
+          sub={salarySettings.annualSalary > 0
+            ? `${fmt(moneyFlow.netSalary)} salary + ${fmt(moneyFlow.otherIncome + moneyFlow.reimbursements)} other`
+            : format(selectedMonth, 'MMMM yyyy')}
+          icon={ArrowUpRight}
+          positive={true}
+        />
+        <StatCard
+          label="Real Spending"
+          value={fmt(moneyFlow.realExpenses)}
+          sub={format(selectedMonth, 'MMMM yyyy')}
+          icon={ArrowDownRight}
+          positive={false}
+        />
+        <StatCard
+          label="Transfers Out"
+          value={fmt(moneyFlow.transferPayments)}
+          sub="Debt payments, investments, transfers"
+          icon={ArrowRightLeft}
+          accent="text-text-muted"
+        />
         <StatCard
           label="Net Cash Flow"
-          value={fmt(monthNet)}
-          sub="income minus expenses"
-          icon={CreditCard}
-          positive={monthNet >= 0 ? true : false}
+          value={fmt(moneyFlow.netCashFlow)}
+          sub="money in minus real spending"
+          icon={DollarSign}
+          positive={moneyFlow.netCashFlow >= 0}
         />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Cash flow area chart */}
-        <div className="card p-5 lg:col-span-2">
-          <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">Cash Flow — Last 12 Months</h2>
-          {monthlyTotals.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={monthlyTotals} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4ecca3" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#4ecca3" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="expenseGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+      {/* Money In breakdown */}
+      {hasData && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="card p-5">
+            <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">Money In Breakdown</h2>
+            <div className="space-y-3">
+              {moneyFlow.netSalary > 0 && (
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-text-secondary text-xs">Net Salary</span>
+                    <span className="text-accent-teal text-xs font-medium">{fmt(moneyFlow.netSalary)}</span>
+                  </div>
+                  <div className="h-1.5 bg-bg-hover rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-accent-teal transition-all"
+                      style={{ width: `${moneyFlow.totalMoneyIn > 0 ? (moneyFlow.netSalary / moneyFlow.totalMoneyIn) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              {moneyFlow.reimbursements > 0 && (
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-text-secondary text-xs">Reimbursements</span>
+                    <span className="text-text-primary text-xs font-medium">{fmt(moneyFlow.reimbursements)}</span>
+                  </div>
+                  <div className="h-1.5 bg-bg-hover rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${moneyFlow.totalMoneyIn > 0 ? (moneyFlow.reimbursements / moneyFlow.totalMoneyIn) * 100 : 0}%`,
+                        backgroundColor: '#a3e635',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {moneyFlow.otherIncome > 0 && (
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-text-secondary text-xs">Other Income</span>
+                    <span className="text-text-primary text-xs font-medium">{fmt(moneyFlow.otherIncome)}</span>
+                  </div>
+                  <div className="h-1.5 bg-bg-hover rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-blue-400 transition-all"
+                      style={{ width: `${moneyFlow.totalMoneyIn > 0 ? (moneyFlow.otherIncome / moneyFlow.totalMoneyIn) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              {moneyFlow.totalMoneyIn === 0 && (
+                <p className="text-text-muted text-sm text-center py-4">No income this month</p>
+              )}
+            </div>
+          </div>
+
+          {/* Top real spending */}
+          <div className="card p-5">
+            <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">
+              Real Spending · {format(selectedMonth, 'MMM')}
+            </h2>
+            {topCategories.length > 0 ? (
+              <div className="space-y-3">
+                {topCategories.map(([cat, amount]) => {
+                  const pct = moneyFlow.realExpenses > 0 ? (amount / moneyFlow.realExpenses) * 100 : 0;
+                  const color = CATEGORY_COLORS[cat] || '#6b7280';
+                  return (
+                    <div key={cat}>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-text-secondary text-xs truncate">{cat}</span>
+                        <span className="text-text-primary text-xs font-medium ml-2 flex-shrink-0">{fmt(amount)}</span>
+                      </div>
+                      <div className="h-1.5 bg-bg-hover rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, backgroundColor: color }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="h-32 flex items-center justify-center text-text-muted text-sm">No spending data</div>
+            )}
+            {recurringMonthly > 0 && (
+              <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <RefreshCw className="w-3 h-3 text-text-muted" />
+                  <span className="text-text-muted text-xs">Recurring / mo</span>
+                </div>
+                <span className="text-text-secondary text-xs font-medium">{fmt(recurringMonthly)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Transfer payments (not real spending) */}
+          <div className="card p-5">
+            <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">
+              Transfers · {format(selectedMonth, 'MMM')}
+            </h2>
+            <p className="text-text-muted text-xs mb-3">
+              Money moving between your accounts — not real spending
+            </p>
+            {transferBreakdown.length > 0 ? (
+              <div className="space-y-3">
+                {transferBreakdown.map(([cat, amount]) => {
+                  const color = CATEGORY_COLORS[cat] || '#6b7280';
+                  return (
+                    <div key={cat} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                        <span className="text-text-secondary text-xs">{cat}</span>
+                      </div>
+                      <span className="text-text-muted text-xs font-medium">{fmt(amount)}</span>
+                    </div>
+                  );
+                })}
+                <div className="pt-2 border-t border-border flex justify-between">
+                  <span className="text-text-muted text-xs font-medium">Total</span>
+                  <span className="text-text-secondary text-xs font-medium">{fmt(moneyFlow.transferPayments)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="h-20 flex items-center justify-center text-text-muted text-sm">No transfers</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 12-month trend chart */}
+      {hasData && (
+        <div className="card p-5">
+          <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">Money In vs Real Spending — Last 12 Months</h2>
+          {trendData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={trendData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e1e38" />
-                <XAxis dataKey="month" tickFormatter={(v) => format(new Date(v + '-01'), 'MMM')} tick={{ fontSize: 11, fill: '#8888aa' }} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#8888aa' }} />
                 <YAxis tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: '#8888aa' }} width={45} />
                 <Tooltip content={<CustomTooltip />} />
-                <Area type="monotone" dataKey="income" name="Income" stroke="#4ecca3" strokeWidth={2} fill="url(#incomeGrad)" />
-                <Area type="monotone" dataKey="expenses" name="Expenses" stroke="#ef4444" strokeWidth={2} fill="url(#expenseGrad)" />
-              </AreaChart>
+                <Legend
+                  wrapperStyle={{ fontSize: '11px', color: '#8888aa' }}
+                />
+                <Bar dataKey="moneyIn" name="Money In" fill="#4ecca3" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="realExpenses" name="Real Spending" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="transfers" name="Transfers" fill="#71717a" radius={[3, 3, 0, 0]} />
+              </BarChart>
             </ResponsiveContainer>
           ) : (
             <div className="h-48 flex items-center justify-center text-text-muted text-sm">Import data to see trends</div>
           )}
         </div>
-
-        {/* Top categories donut-style */}
-        <div className="card p-5">
-          <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">
-            Top Spending · {format(selectedMonth, 'MMM')}
-          </h2>
-          {topCategories.length > 0 ? (
-            <div className="space-y-3">
-              {topCategories.map(([cat, amount]) => {
-                const pct = monthExpenses > 0 ? (amount / monthExpenses) * 100 : 0;
-                const color = CATEGORY_COLORS[cat] || '#6b7280';
-                return (
-                  <div key={cat}>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-text-secondary text-xs truncate">{cat}</span>
-                      <span className="text-text-primary text-xs font-medium ml-2 flex-shrink-0">{fmt(amount)}</span>
-                    </div>
-                    <div className="h-1.5 bg-bg-hover rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${pct}%`, backgroundColor: color }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="h-32 flex items-center justify-center text-text-muted text-sm">No spending data</div>
-          )}
-          {recurringMonthly > 0 && (
-            <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <RefreshCw className="w-3 h-3 text-text-muted" />
-                <span className="text-text-muted text-xs">Recurring / mo</span>
-              </div>
-              <span className="text-text-secondary text-xs font-medium">{fmt(recurringMonthly)}</span>
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Accounts + Recent transactions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -260,6 +404,14 @@ export default function OverviewPage() {
           ) : (
             <p className="text-text-muted text-sm text-center py-6">Add accounts via Import Data</p>
           )}
+          {accounts.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-border flex justify-between">
+              <span className="text-text-muted text-xs font-medium">Net Worth</span>
+              <span className={`text-sm font-semibold ${netWorth >= 0 ? 'text-accent-teal' : 'text-accent-red'}`}>
+                {fmt(netWorth)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Recent transactions */}
@@ -267,17 +419,25 @@ export default function OverviewPage() {
           <h2 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-4">Recent Transactions</h2>
           {recent.length > 0 ? (
             <div className="space-y-1">
-              {recent.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                  <div className="min-w-0">
-                    <p className="text-text-primary text-sm truncate">{tx.description}</p>
-                    <p className="text-text-muted text-xs">{format(new Date(tx.date), 'MMM d')} · {tx.category}</p>
+              {recent.map((tx) => {
+                const isTransfer = isTransferPayment(tx);
+                return (
+                  <div key={tx.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                    <div className="min-w-0">
+                      <p className={`text-sm truncate ${isTransfer ? 'text-text-muted' : 'text-text-primary'}`}>{tx.description}</p>
+                      <p className="text-text-muted text-xs">
+                        {format(new Date(tx.date), 'MMM d')} · {tx.category}
+                        {isTransfer && <span className="ml-1 text-text-muted/60">(transfer)</span>}
+                      </p>
+                    </div>
+                    <span className={`text-sm font-medium ml-3 flex-shrink-0 ${
+                      isTransfer ? 'text-text-muted' : tx.amount >= 0 ? 'text-accent-teal' : 'text-text-primary'
+                    }`}>
+                      {tx.amount >= 0 ? '+' : ''}{fmt(tx.amount)}
+                    </span>
                   </div>
-                  <span className={`text-sm font-medium ml-3 flex-shrink-0 ${tx.amount >= 0 ? 'text-accent-teal' : 'text-text-primary'}`}>
-                    {tx.amount >= 0 ? '+' : ''}{fmt(tx.amount)}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="text-text-muted text-sm text-center py-6">No transactions yet</p>

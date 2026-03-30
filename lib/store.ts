@@ -1,6 +1,6 @@
 'use client';
 
-import { AppData, Transaction, Account, RecurringExpense, BudgetCategory, IncomeEntry, TaxSettings, SalarySettings } from './types';
+import { AppData, Transaction, RecurringExpense, BudgetCategory, IncomeEntry, TaxSettings, SalarySettings, CategoryRule } from './types';
 
 const STORAGE_KEY = 'finance_dashboard_v1';
 
@@ -36,6 +36,7 @@ const DEFAULT_DATA: AppData = {
   incomeEntries: [],
   taxSettings: DEFAULT_TAX_SETTINGS,
   salarySettings: DEFAULT_SALARY_SETTINGS,
+  categoryRules: [],
   lastUpdated: new Date().toISOString(),
 };
 
@@ -218,6 +219,118 @@ export function getUniqueAccounts(transactions: Transaction[]): string[] {
 
 export function getUniqueSources(transactions: Transaction[]): string[] {
   return Array.from(new Set(transactions.map((t) => t.source))).sort();
+}
+
+// ─── Category rule helpers ──────────────────────────────────────────────────
+
+export function applyUserCategoryRules(data: AppData): AppData {
+  // Apply user-defined category rules to all transactions
+  const rules = (data.categoryRules || []).filter((r) => r.enabled);
+  if (rules.length === 0) return data;
+  const updated = data.transactions.map((t) => {
+    for (const rule of rules) {
+      if (t.description.toLowerCase().includes(rule.keyword.toLowerCase())) {
+        return { ...t, category: rule.category };
+      }
+    }
+    return t;
+  });
+  return { ...data, transactions: updated };
+}
+
+export function updateTransactionCategory(data: AppData, transactionId: string, newCategory: string): AppData {
+  return {
+    ...data,
+    transactions: data.transactions.map((t) =>
+      t.id === transactionId ? { ...t, category: newCategory } : t
+    ),
+  };
+}
+
+// ─── Money Flow helpers ─────────────────────────────────────────────────────
+
+// Categories that represent money moving between your own accounts — NOT real spending or income
+const TRANSFER_CATEGORIES = ['Transfers', 'Debt Payment', 'Investments'];
+const NOT_REAL_INCOME = ['Transfers', 'Investments', 'Reimbursement', 'Debt Payment'];
+
+export function isRealExpense(t: Transaction): boolean {
+  return t.amount < 0 && !TRANSFER_CATEGORIES.includes(t.category);
+}
+
+export function isRealIncome(t: Transaction): boolean {
+  // Real income = positive amounts that aren't transfers/reimbursements/debt payments
+  // Reimbursements are money-in but offset group expenses, not "income"
+  return t.amount > 0 && !NOT_REAL_INCOME.includes(t.category);
+}
+
+export function isReimbursement(t: Transaction): boolean {
+  return t.amount > 0 && t.category === 'Reimbursement';
+}
+
+export function isTransferPayment(t: Transaction): boolean {
+  return TRANSFER_CATEGORIES.includes(t.category);
+}
+
+export function getMonthlyNetSalary(settings: SalarySettings, month: number, taxEst: { total: number }): number {
+  // Net salary for a given month = gross for that month minus monthly tax share
+  const gross = getExpectedMonthlyGross(settings, month);
+  const monthlyTax = taxEst.total / 12;
+  return gross - monthlyTax;
+}
+
+export interface MoneyFlowSummary {
+  netSalary: number;
+  otherIncome: number;     // real income that's not salary (freelance, side income)
+  reimbursements: number;  // e-transfer paybacks for group expenses
+  totalMoneyIn: number;
+  realExpenses: number;
+  transferPayments: number;
+  totalMoneyOut: number;
+  netCashFlow: number;
+}
+
+export function getMonthlyMoneyFlow(
+  transactions: Transaction[],
+  salarySettings: SalarySettings,
+  month: number,
+  year: number,
+  taxEst: { total: number },
+): MoneyFlowSummary {
+  const monthTx = transactions.filter((t) => {
+    const d = new Date(t.date);
+    return d.getFullYear() === year && d.getMonth() === month;
+  });
+
+  // Net salary from salary settings (not from transactions)
+  const netSalary = salarySettings.annualSalary > 0 ? getMonthlyNetSalary(salarySettings, month, taxEst) : 0;
+
+  // Other income from transactions (non-salary, non-transfer positive amounts)
+  const otherIncomeTx = monthTx.filter((t) => t.amount > 0 && !NOT_REAL_INCOME.includes(t.category) && t.category !== 'Income');
+  const otherIncome = otherIncomeTx.reduce((s, t) => s + t.amount, 0);
+
+  // Reimbursements
+  const reimbursements = monthTx.filter(isReimbursement).reduce((s, t) => s + t.amount, 0);
+
+  const totalMoneyIn = netSalary + otherIncome + reimbursements;
+
+  // Real expenses (negative amounts, excluding transfers)
+  const realExpenses = Math.abs(monthTx.filter(isRealExpense).reduce((s, t) => s + t.amount, 0));
+
+  // Transfer payments (debt payments, account transfers, investments)
+  const transferPayments = Math.abs(monthTx.filter((t) => t.amount < 0 && isTransferPayment(t)).reduce((s, t) => s + t.amount, 0));
+
+  const totalMoneyOut = realExpenses;
+
+  return {
+    netSalary: Math.round(netSalary),
+    otherIncome: Math.round(otherIncome),
+    reimbursements: Math.round(reimbursements),
+    totalMoneyIn: Math.round(totalMoneyIn),
+    realExpenses: Math.round(realExpenses),
+    transferPayments: Math.round(transferPayments),
+    totalMoneyOut: Math.round(totalMoneyOut),
+    netCashFlow: Math.round(totalMoneyIn - totalMoneyOut),
+  };
 }
 
 // ─── Salary / Income helpers ─────────────────────────────────────────────────
