@@ -6,7 +6,7 @@ import { Trash2, AlertTriangle, Search, Filter, Database, ChevronDown, ChevronUp
 import {
   loadData, saveData, wipeTransactionsByAccount, deleteTransaction,
   getUniqueAccounts, findDuplicates, removeDuplicates,
-  updateTransactionCategory, applyUserCategoryRules,
+  updateTransactionCategory, applyUserCategoryRules, recategorizeAllTransactions,
 } from '@/lib/store';
 import { AppData, Transaction, CategoryRule } from '@/lib/types';
 import { CATEGORIES, CATEGORY_COLORS } from '@/lib/categories';
@@ -48,9 +48,9 @@ function TransactionRow({ t, selectedIds, toggleSelect, handleChangeCategory, ha
         </div>
         <div className="flex items-center gap-2 text-text-muted text-xs mt-0.5">
           <span>{format(new Date(t.date), 'MMM d, yyyy')}</span>
-          <span>·</span>
+          <span>Â·</span>
           <span>{t.account}</span>
-          <span>·</span>
+          <span>Â·</span>
           <span>{t.source}</span>
         </div>
       </div>
@@ -177,7 +177,7 @@ export default function DataManagementPage() {
 
   if (!data) return null;
 
-  // ─── Handlers ─────────────────────────────────────────────────────────
+  // âââ Handlers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   function persist(updated: AppData) {
     saveData(updated);
@@ -256,7 +256,7 @@ export default function DataManagementPage() {
     setSelectedIds(new Set());
   }
 
-  // ─── Rules handlers ───────────────────────────────────────────────────
+  // âââ Rules handlers âââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   function handleAddRule() {
     if (!data || !newRuleKeyword.trim()) return;
@@ -306,7 +306,7 @@ export default function DataManagementPage() {
     return transactions.filter((t) => t.description.toLowerCase().includes(lower)).length;
   }
 
-  // ─── Render ────────────────────────────────────────────────────────────
+  // âââ Render ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   const TABS: { id: TabId; label: string }[] = [
     { id: 'transactions', label: 'Transactions' },
@@ -340,7 +340,7 @@ export default function DataManagementPage() {
         ))}
       </div>
 
-      {/* ═══ TRANSACTIONS TAB ═══ */}
+      {/* âââ TRANSACTIONS TAB âââ */}
       {activeTab === 'transactions' && (
         <>
           {/* Account cards */}
@@ -408,7 +408,7 @@ export default function DataManagementPage() {
                 {duplicateGroups.slice(0, 10).map((g) => (
                   <div key={g.fingerprint} className="flex items-center justify-between text-xs px-2 py-1 rounded bg-bg-hover/50">
                     <span className="text-text-secondary truncate flex-1">
-                      {g.transactions[0].description} — {format(new Date(g.transactions[0].date), 'MMM d, yyyy')} — {fmt(g.transactions[0].amount)}
+                      {g.transactions[0].description} â {format(new Date(g.transactions[0].date), 'MMM d, yyyy')} â {fmt(g.transactions[0].amount)}
                     </span>
                     <span className="text-amber-400 font-medium ml-2">{g.transactions.length}x</span>
                   </div>
@@ -423,7 +423,7 @@ export default function DataManagementPage() {
           {/* Search / filter / actions bar */}
           <div className="card p-4">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="relative flex-1 min-w-[200px]">
+              <div className="relative flex-1 min-w[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
                 <input
                   type="text"
@@ -583,7 +583,7 @@ export default function DataManagementPage() {
               </div>
             )}
 
-            {/* ── Grouped by month (date sort) ── */}
+            {/* ââ Grouped by month (date sort) ââ */}
             {sortBy === 'date' && groupedByMonth.map(({ month, label, transactions: txns, total, count }) => {
               const isExpanded = expandedMonth === month;
               const monthAllSelected = txns.every((t) => selectedIds.has(t.id));
@@ -623,7 +623,7 @@ export default function DataManagementPage() {
               );
             })}
 
-            {/* ── Flat list (amount sort) ── */}
+            {/* ââ Flat list (amount sort) ââ */}
             {sortBy !== 'date' && filtered.length > 0 && (
               <div className="card overflow-hidden">
                 <div className="px-5 py-3 border-b border-border flex items-center justify-between">
@@ -643,7 +643,7 @@ export default function DataManagementPage() {
         </>
       )}
 
-      {/* ═══ RULES TAB ═══ */}
+      {/* âââ RULES TAB âââ */}
       {activeTab === 'rules' && (
         <div className="space-y-6">
           {/* Explanation */}
@@ -654,8 +654,8 @@ export default function DataManagementPage() {
                 <h3 className="text-text-primary text-sm font-medium mb-1">Category Rules</h3>
                 <p className="text-text-muted text-xs leading-relaxed">
                   Create rules to automatically re-categorize transactions based on keywords in their description.
-                  This is useful for bulk-fixing miscategorized transactions — for example, marking all &quot;PAYMENT THANK YOU&quot; transactions as &quot;Debt Payment&quot;
-                  or all e-transfers from a specific person as &quot;Reimbursement&quot;. Rules are applied in order — the first match wins.
+                  This is useful for bulk-fixing miscategorized transactions â for example, marking all &quot;PAYMENT THANK YOU&quot; transactions as &quot;Debt Payment&quot;
+                  or all e-transfers from a specific person as &quot;Reimbursement&quot;. Rules are applied in order â the first match wins.
                 </p>
               </div>
             </div>
@@ -713,6 +713,17 @@ export default function DataManagementPage() {
                   <Zap className="w-3 h-3" /> Apply All Rules Now
                 </button>
               )}
+              <button
+                onClick={() => {
+                  if (!data) return;
+                  const updated = recategorizeAllTransactions(data);
+                  saveData(updated);
+                  setData(updated);
+                }}
+                className="flex items-center gap-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Tag className="w-3 h-3" /> Re-categorize All Transactions
+              </button>
             </div>
             {categoryRules.length === 0 ? (
               <div className="p-8 text-center">
@@ -733,7 +744,7 @@ export default function DataManagementPage() {
                       <span className="text-text-primary text-sm font-medium bg-bg-hover px-2 py-0.5 rounded truncate">
                         &quot;{rule.keyword}&quot;
                       </span>
-                      <span className="text-text-muted text-xs">→</span>
+                      <span className="text-text-muted text-xs">â</span>
                       <select
                         value={rule.category}
                         onChange={(e) => handleRuleChangeCategory(rule.id, e.target.value)}
@@ -760,3 +771,4 @@ export default function DataManagementPage() {
     </div>
   );
 }
+
