@@ -1,6 +1,7 @@
 'use client';
 
 import { AppData, Transaction, RecurringExpense, BudgetCategory, IncomeEntry, TaxSettings, SalarySettings, CategoryRule } from './types';
+import { categorizeTransaction } from './categories';
 
 const STORAGE_KEY = 'finance_dashboard_v1';
 
@@ -64,7 +65,7 @@ export function saveData(data: AppData): void {
   syncToServer(updated).catch(() => {});
 }
 
-// ─── Server sync ─────────────────────────────────────────────────────────────
+// âââ Server sync âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 async function syncToServer(data: AppData): Promise<void> {
   try {
@@ -74,7 +75,7 @@ async function syncToServer(data: AppData): Promise<void> {
       body: JSON.stringify(data),
     });
   } catch {
-    // Server unavailable — localStorage is the fallback
+    // Server unavailable â localStorage is the fallback
   }
 }
 
@@ -129,7 +130,7 @@ export function removeDuplicates(data: AppData): { data: AppData; removed: numbe
   return { data: { ...data, transactions: unique }, removed };
 }
 
-// ─── Utility helpers ──────────────────────────────────────────────────────────
+// âââ Utility helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export function getTransactionsByMonth(transactions: Transaction[], year: number, month: number): Transaction[] {
   return transactions.filter((t) => {
@@ -190,7 +191,7 @@ export function getMonthlyTotals(transactions: Transaction[]): { month: string; 
     }));
 }
 
-// ─── Data Management helpers ─────────────────────────────────────────────────
+// âââ Data Management helpers âââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export function wipeTransactionsByAccount(data: AppData, accountName: string): AppData {
   return {
@@ -221,7 +222,7 @@ export function getUniqueSources(transactions: Transaction[]): string[] {
   return Array.from(new Set(transactions.map((t) => t.source))).sort();
 }
 
-// ─── Category rule helpers ──────────────────────────────────────────────────
+// âââ Category rule helpers ââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export function applyUserCategoryRules(data: AppData): AppData {
   // Apply user-defined category rules to all transactions
@@ -238,6 +239,19 @@ export function applyUserCategoryRules(data: AppData): AppData {
   return { ...data, transactions: updated };
 }
 
+/**
+ * Re-categorize ALL transactions using account-aware logic.
+ * Useful after updating categorization rules or importing data that was
+ * categorized without account context.
+ */
+export function recategorizeAllTransactions(data: AppData): AppData {
+  const updated = data.transactions.map((t) => ({
+    ...t,
+    category: categorizeTransaction(t.description, t.amount, t.account),
+  }));
+  return { ...data, transactions: updated };
+}
+
 export function updateTransactionCategory(data: AppData, transactionId: string, newCategory: string): AppData {
   return {
     ...data,
@@ -247,9 +261,9 @@ export function updateTransactionCategory(data: AppData, transactionId: string, 
   };
 }
 
-// ─── Money Flow helpers ─────────────────────────────────────────────────────
+// âââ Money Flow helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-// Categories that represent money moving between your own accounts — NOT real spending or income
+// Categories that represent money moving between your own accounts â NOT real spending or income
 const TRANSFER_CATEGORIES = ['Transfers', 'Debt Payment', 'Investments'];
 const NOT_REAL_INCOME = ['Transfers', 'Investments', 'Reimbursement', 'Debt Payment'];
 
@@ -301,20 +315,18 @@ export function getMonthlyMoneyFlow(
     return d.getFullYear() === year && d.getMonth() === month;
   });
 
-  // Net salary from salary settings (not from transactions)
-  const netSalary = salarySettings.annualSalary > 0 ? getMonthlyNetSalary(salarySettings, month, taxEst) : 0;
-
-  // When salary settings are configured, identify salary-related deposits so we don't double-count.
-  // This catches payroll deposits, e-transfers from employer, etc.
+  // Detect salary deposits from transaction data
+  const detected = detectSalaryDeposits(monthTx);
   const salaryDepositIds = new Set<string>();
-  if (salarySettings.annualSalary > 0) {
-    const detected = detectSalaryDeposits(monthTx);
-    detected.forEach((t) => salaryDepositIds.add(t.id));
-    // Also exclude any transaction categorized as 'Income' — these are salary deposits
-    monthTx.forEach((t) => {
-      if (t.amount > 0 && t.category === 'Income') salaryDepositIds.add(t.id);
-    });
-  }
+  detected.forEach((t) => salaryDepositIds.add(t.id));
+  // Also mark anything categorized as 'Income' with large amount as salary
+  monthTx.forEach((t) => {
+    if (t.amount >= 5500 && t.category === 'Income') salaryDepositIds.add(t.id);
+  });
+
+  // Net salary: use actual deposit amounts (sum of detected salary deposits)
+  // This is the source of truth â the user's actual take-home pay
+  const netSalary = detected.reduce((s, t) => s + t.amount, 0);
 
   // Other income: positive amounts that are NOT salary, NOT transfers/investments, NOT reimbursements
   const otherIncomeTx = monthTx.filter((t) =>
@@ -325,7 +337,7 @@ export function getMonthlyMoneyFlow(
   );
   const otherIncome = otherIncomeTx.reduce((s, t) => s + t.amount, 0);
 
-  // Reimbursements — but exclude any that are actually salary deposits detected above
+  // Reimbursements â but exclude any that are actually salary deposits detected above
   const reimbursements = monthTx
     .filter((t) => isReimbursement(t) && !salaryDepositIds.has(t.id))
     .reduce((s, t) => s + t.amount, 0);
@@ -352,7 +364,7 @@ export function getMonthlyMoneyFlow(
   };
 }
 
-// ─── Salary / Income helpers ─────────────────────────────────────────────────
+// âââ Salary / Income helpers âââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export function getMonthlyGrossSalary(settings: SalarySettings): number {
   if (!settings.annualSalary) return 0;
@@ -384,30 +396,31 @@ export function getExpectedMonthlyGross(settings: SalarySettings, month: number)
 }
 
 export function detectSalaryDeposits(transactions: Transaction[]): Transaction[] {
-  // Find deposits that look like salary or payroll.
-  // This includes direct deposits, large recurring deposits, and e-transfers from employer.
+  // Find deposits that look like salary.
+  // Only matches: payroll keywords, or "deposit" >= $5,500 (monthly net salary range)
+  // Does NOT catch all large deposits â that was causing false positives.
   const salaryKeywords = [
     'payroll', 'salary', 'direct deposit', 'paycheque', 'paycheck',
-    'pay', 'employment', 'bi-weekly pay', 'semi-monthly', 'compensation',
-    'deposit from', 'electronic deposit',
+    'employment', 'bi-weekly pay', 'semi-monthly',
   ];
 
   return transactions
     .filter((t) => {
-      if (t.amount <= 0) return false; // must be a deposit
-      if (t.category === 'Transfers' || t.category === 'Investments') return false;
+      if (t.amount <= 0) return false;
+      if (t.category === 'Transfers' || t.category === 'Investments' || t.category === 'Reimbursement') return false;
       const lower = t.description.toLowerCase();
       // Match salary keywords
       if (salaryKeywords.some((kw) => lower.includes(kw))) return true;
-      // Catch large deposits (> $1000) — likely salary, e-transfers from employer, or bonus
-      // These would otherwise be double-counted alongside salary settings
-      if (t.amount >= 1000) return true;
+      // Large "deposit" entries on debit are salary ($5,500+ = monthly net salary range)
+      if (lower === 'deposit' && t.amount >= 5500) return true;
+      // Also catch anything already categorized as Income
+      if (t.category === 'Income' && t.amount >= 5500) return true;
       return false;
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-// ─── Canadian Tax Estimate (simplified) ───────────────────────────────────────
+// âââ Canadian Tax Estimate (simplified) âââââââââââââââââââââââââââââââââââââââ
 interface TaxBracket { min: number; max: number; rate: number }
 
 const FEDERAL_BRACKETS_2024: TaxBracket[] = [
@@ -468,3 +481,4 @@ export function estimateTax(grossIncome: number, rrspContributions: number = 0):
     netIncome: Math.round(grossIncome - total),
   };
 }
+
