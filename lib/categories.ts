@@ -136,11 +136,11 @@ const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
     category: 'Investments',
   },
   {
-    keywords: ['payment thank you', 'payment - thank', 'payment received', 'payment - bill', 'bill payment', 'loan payment', 'loc payment', 'line of credit payment', 'credit card payment', 'visa payment', 'mastercard payment', 'amex payment', 'payment - pmt'],
+    keywords: ['payment thank you', 'payment - thank', 'payment received', 'payment - bill', 'bill payment', 'loan payment', 'loc payment', 'line of credit payment', 'credit card payment', 'visa payment', 'mastercard payment', 'amex payment', 'payment - pmt', 'credit card/loc pay', 'payment from'],
     category: 'Debt Payment',
   },
   {
-    keywords: ['transfer', 'send money', 'wire', 'zelle', 'paypal transfer'],
+    keywords: ['transfer', 'send money', 'wire', 'zelle', 'paypal transfer', 'mb-transfer', 'pc transfer'],
     category: 'Transfers',
   },
   {
@@ -165,9 +165,48 @@ const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
   },
 ];
 
-export function categorizeTransaction(description: string, amount?: number): string {
+export function categorizeTransaction(description: string, amount?: number, account?: string): string {
   const lower = description.toLowerCase();
+  const acctLower = (account || '').toLowerCase();
 
+  // ─── Inter-account transfer detection ─────────────────────────────────
+  // Debit/chequing account paying a credit card or LOC → Debt Payment
+  // These are withdrawals (negative) on the debit side that mention the target account
+  if (amount !== undefined && amount < 0) {
+    // Paying American Express from debit
+    if (lower.includes('american express') || lower.includes('amex')) {
+      return 'Debt Payment';
+    }
+    // Paying Scotiabank Passport Visa from debit
+    if (lower.includes('passport') || (lower.includes('visa') && !lower.includes('division'))) {
+      // "visa" in description on a non-visa account = paying the visa
+      if (!acctLower.includes('visa') && !acctLower.includes('passport') && !acctLower.includes('amex')) {
+        return 'Debt Payment';
+      }
+    }
+    // LOC payment from debit — "CASH ADVANCE TO" or similar going to LOC
+    if (lower.includes('cash advance') && lower.includes('to')) {
+      return 'Debt Payment';
+    }
+    // MB-Transfer from chequing to another Scotiabank product
+    if ((lower.includes('mb-transfer') || lower.includes('mb - transfer') || lower.includes('pc transfer')) && !acctLower.includes('loc') && !acctLower.includes('line of credit')) {
+      return 'Transfers';
+    }
+  }
+
+  // LOC/Visa side: receiving a payment from another account → Debt Payment
+  if (amount !== undefined && amount > 0) {
+    if (lower.includes('payment from') || lower.includes('credit card/loc pay')) {
+      return 'Debt Payment';
+    }
+    // MB-Transfer arriving on LOC/Visa side
+    if ((lower.includes('mb-transfer') || lower.includes('mb - transfer') || lower.includes('mb - cash advance')) &&
+        (acctLower.includes('loc') || acctLower.includes('line of credit') || acctLower.includes('visa') || acctLower.includes('passport'))) {
+      return 'Debt Payment';
+    }
+  }
+
+  // ─── E-transfer handling ──────────────────────────────────────────────
   // Incoming e-transfers (positive amount) → Reimbursement
   if (amount !== undefined && amount > 0 && (lower.includes('e-transfer') || lower.includes('interac') || lower.includes('etransfer'))) {
     return 'Reimbursement';
