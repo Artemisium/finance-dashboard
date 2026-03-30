@@ -37,12 +37,16 @@ export interface Account {
 export interface RecurringExpense {
   id: string;
   name: string;
-  amount: number;
+  amount: number; // expected/flat rate per period
   frequency: 'weekly' | 'monthly' | 'quarterly' | 'annual';
   category: string;
   dayOfMonth?: number;
   notes?: string;
   active: boolean;
+  // --- Transaction matching ---
+  matchKeyword?: string;        // auto-match transactions by keyword (case-insensitive)
+  matchAccount?: string;        // restrict matching to specific account
+  linkedTransactionIds?: string[]; // manually linked transactions (for generic descriptions like "withdrawal")
 }
 
 export interface BudgetCategory {
