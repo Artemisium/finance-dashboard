@@ -37,7 +37,7 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
-// Keyword → category mapping for auto-categorization
+// Keyword â category mapping for auto-categorization
 const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
   {
     keywords: ['loblaws', 'metro', 'sobeys', 'no frills', 'food basics', 'superstore', 'freshco', 'walmart', 'costco', 'aldi', 'whole foods', 'grocery', 'groceries', 'farm boy', 'longos'],
@@ -148,7 +148,7 @@ const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
     category: 'Income',
   },
   {
-    keywords: ['atm', 'cash withdrawal', 'withdrawal'],
+    keywords: ['atm', 'cash withdrawal'],
     category: 'ATM & Cash',
   },
   {
@@ -164,13 +164,12 @@ const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
     category: 'Charity & Donations',
   },
 ];
-
 export function categorizeTransaction(description: string, amount?: number, account?: string): string {
   const lower = description.toLowerCase();
   const acctLower = (account || '').toLowerCase();
 
-  // ─── Inter-account transfer detection ─────────────────────────────────
-  // Debit/chequing account paying a credit card or LOC → Debt Payment
+  // âââ Inter-account transfer detection âââââââââââââââââââââââââââââââââ
+  // Debit/chequing account paying a credit card or LOC â Debt Payment
   // These are withdrawals (negative) on the debit side that mention the target account
   if (amount !== undefined && amount < 0) {
     // "miscellaneous payment" on debit = paying a credit card (Amex, Visa, etc.)
@@ -187,7 +186,7 @@ export function categorizeTransaction(description: string, amount?: number, acco
         return 'Debt Payment';
       }
     }
-    // LOC payment from debit — "CASH ADVANCE TO" or similar going to LOC
+    // LOC payment from debit â "CASH ADVANCE TO" or similar going to LOC
     if (lower.includes('cash advance') && lower.includes('to')) {
       return 'Debt Payment';
     }
@@ -201,7 +200,7 @@ export function categorizeTransaction(description: string, amount?: number, acco
     }
   }
 
-  // LOC/Visa side: receiving a payment from another account → Debt Payment
+  // LOC/Visa side: receiving a payment from another account â Debt Payment
   if (amount !== undefined && amount > 0) {
     // "payment from - *****02*36" on LOC or Visa = receiving payment from chequing
     if (lower.includes('payment from')) {
@@ -221,14 +220,28 @@ export function categorizeTransaction(description: string, amount?: number, acco
     }
   }
 
-  // ─── E-transfer handling ──────────────────────────────────────────────
-  // Incoming e-transfers (positive amount) → Reimbursement
+  // âââ E-transfer handling ââââââââââââââââââââââââââââââââââââââââââââââ
+  // Incoming e-transfers (positive amount) â Reimbursement
   if (amount !== undefined && amount > 0 && (lower.includes('e-transfer') || lower.includes('interac') || lower.includes('etransfer'))) {
     return 'Reimbursement';
   }
-  // Outgoing e-transfers (negative amount) → Transfers
+  // Outgoing e-transfers (negative amount) â Transfers
   if (amount !== undefined && amount < 0 && (lower.includes('e-transfer') || lower.includes('interac') || lower.includes('etransfer'))) {
     return 'Transfers';
+  }
+
+  // âââ Generic Scotiabank descriptions âââââââââââââââââââââââââââââââââ
+  // "deposit" on debit â large ones ($5,500+) are salary, smaller ones are other income
+  if (lower === 'deposit' && amount !== undefined && amount > 0) {
+    if (amount >= 5500) return 'Income'; // Monthly salary range
+    return 'Other'; // Small deposits â could be anything, user should recategorize
+  }
+
+  // "withdrawal" on debit â Scotiabank uses this for everything (ATM, rent, CC payments)
+  // We can't auto-categorize these reliably, so leave as "Other" for user to sort out
+  // (Previously this was catching ALL withdrawals as ATM & Cash, which was wrong)
+  if (lower === 'withdrawal' && amount !== undefined && amount < 0) {
+    return 'Other'; // User needs to manually categorize or set up rules
   }
 
   for (const rule of CATEGORY_RULES) {
