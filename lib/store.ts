@@ -304,12 +304,31 @@ export function getMonthlyMoneyFlow(
   // Net salary from salary settings (not from transactions)
   const netSalary = salarySettings.annualSalary > 0 ? getMonthlyNetSalary(salarySettings, month, taxEst) : 0;
 
-  // Other income from transactions (non-salary, non-transfer positive amounts)
-  const otherIncomeTx = monthTx.filter((t) => t.amount > 0 && !NOT_REAL_INCOME.includes(t.category) && t.category !== 'Income');
+  // When salary settings are configured, identify salary-related deposits so we don't double-count.
+  // This catches payroll deposits, e-transfers from employer, etc.
+  const salaryDepositIds = new Set<string>();
+  if (salarySettings.annualSalary > 0) {
+    const detected = detectSalaryDeposits(monthTx);
+    detected.forEach((t) => salaryDepositIds.add(t.id));
+    // Also exclude any transaction categorized as 'Income' — these are salary deposits
+    monthTx.forEach((t) => {
+      if (t.amount > 0 && t.category === 'Income') salaryDepositIds.add(t.id);
+    });
+  }
+
+  // Other income: positive amounts that are NOT salary, NOT transfers/investments, NOT reimbursements
+  const otherIncomeTx = monthTx.filter((t) =>
+    t.amount > 0
+    && !NOT_REAL_INCOME.includes(t.category)
+    && t.category !== 'Income'
+    && !salaryDepositIds.has(t.id)
+  );
   const otherIncome = otherIncomeTx.reduce((s, t) => s + t.amount, 0);
 
-  // Reimbursements
-  const reimbursements = monthTx.filter(isReimbursement).reduce((s, t) => s + t.amount, 0);
+  // Reimbursements — but exclude any that are actually salary deposits detected above
+  const reimbursements = monthTx
+    .filter((t) => isReimbursement(t) && !salaryDepositIds.has(t.id))
+    .reduce((s, t) => s + t.amount, 0);
 
   const totalMoneyIn = netSalary + otherIncome + reimbursements;
 
@@ -365,9 +384,8 @@ export function getExpectedMonthlyGross(settings: SalarySettings, month: number)
 }
 
 export function detectSalaryDeposits(transactions: Transaction[]): Transaction[] {
-  // Find deposits on chequing/debit accounts that look like salary or payroll
-  // Salary deposits are typically: positive amounts, from chequing accounts,
-  // with patterns like "PAYROLL", "SALARY", "DIRECT DEPOSIT", "PAY", employer names, etc.
+  // Find deposits that look like salary or payroll.
+  // This includes direct deposits, large recurring deposits, and e-transfers from employer.
   const salaryKeywords = [
     'payroll', 'salary', 'direct deposit', 'paycheque', 'paycheck',
     'pay', 'employment', 'bi-weekly pay', 'semi-monthly', 'compensation',
@@ -381,8 +399,9 @@ export function detectSalaryDeposits(transactions: Transaction[]): Transaction[]
       const lower = t.description.toLowerCase();
       // Match salary keywords
       if (salaryKeywords.some((kw) => lower.includes(kw))) return true;
-      // Also detect large recurring deposits (> $1000) that aren't transfers
-      if (t.amount >= 1000 && t.source === 'scotiabank') return true;
+      // Catch large deposits (> $1000) — likely salary, e-transfers from employer, or bonus
+      // These would otherwise be double-counted alongside salary settings
+      if (t.amount >= 1000) return true;
       return false;
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
